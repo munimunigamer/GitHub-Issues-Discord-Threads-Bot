@@ -1,6 +1,7 @@
 import { ForumChannel, MessagePayload, ThreadChannel } from "discord.js";
 import { config } from "../config";
 import { Thread } from "../interfaces";
+import { octokit, repoCredentials } from "../github/githubActions";
 import {
   ActionValue,
   Actions,
@@ -10,6 +11,12 @@ import {
 } from "../logger";
 import { store } from "../store";
 import client from "./discord";
+
+const TAG_BUDGET = {
+  total: 20, // Discord hard limit
+  labels: 17, // For GitHub label sync
+  reserved: 3, // For future kanban columns (Phase 5) and user tags
+};
 
 const info = (action: ActionValue, thread: Thread) =>
   logger.info(`${Triggerer.Github} | ${action} | ${getDiscordUrl(thread)}`);
@@ -175,4 +182,85 @@ export async function getThreadChannel(node_id: string | undefined): Promise<{
   }
 
   return { thread, channel };
+}
+
+export async function syncLabelsToTags() {
+  // 1. Fetch GitHub labels
+  const { data: labels } = await octokit.rest.issues.listLabelsForRepo({
+    ...repoCredentials,
+    per_page: 100,
+  });
+
+  // 2. Fetch the forum channel and get its current availableTags
+  const forum = (await client.channels.fetch(
+    config.DISCORD_CHANNEL_ID,
+  )) as ForumChannel;
+  const existingTags = forum.availableTags;
+
+  // 3. Determine which labels already exist as tags (by name match, case-sensitive)
+  const existingTagNames = new Set(existingTags.map((t) => t.name));
+
+  // 4. Build truncated names, detecting collisions
+  const seenTruncatedNames = new Set<string>(existingTagNames);
+  const newLabels: typeof labels = [];
+
+  for (const label of labels) {
+    const truncatedName = label.name.slice(0, 20);
+
+    // Skip if this label already exists as a tag
+    if (existingTagNames.has(truncatedName)) {
+      continue;
+    }
+
+    // Check for truncation collision (two different labels producing the same 20-char name)
+    if (seenTruncatedNames.has(truncatedName)) {
+      logger.warn(
+        `Tag sync: Skipping label "${label.name}" -- truncated name "${truncatedName}" collides with an existing tag or label`,
+      );
+      continue;
+    }
+
+    seenTruncatedNames.add(truncatedName);
+    newLabels.push(label);
+  }
+
+  // 5. Calculate available slots and enforce budget
+  const usedSlots = existingTags.length;
+  const availableSlots = Math.max(0, TAG_BUDGET.labels - usedSlots);
+
+  const labelsToSync = newLabels.slice(0, availableSlots);
+  if (labelsToSync.length < newLabels.length) {
+    logger.warn(
+      `Tag budget: ${newLabels.length - labelsToSync.length} labels cannot be synced as Discord tags (${TAG_BUDGET.labels}-tag budget, ${usedSlots} slots used)`,
+    );
+  }
+
+  // 6. Create tags (if any new labels to sync)
+  if (labelsToSync.length > 0) {
+    const newTags = labelsToSync.map((l) => ({
+      name: l.name.slice(0, 20),
+    }));
+    await forum.setAvailableTags([...existingTags, ...newTags]);
+  }
+
+  // 7. Refresh the store after tag creation
+  const refreshed = await forum.fetch();
+  store.availableTags = refreshed.availableTags;
+
+  // 8. Populate store.tagMap for ALL synced labels (both pre-existing and newly created)
+  store.tagMap.clear();
+  for (const label of labels) {
+    const truncatedName = label.name.slice(0, 20);
+    const matchingTag = store.availableTags.find(
+      (t) => t.name === truncatedName,
+    );
+    if (matchingTag) {
+      store.tagMap.set(label.name, matchingTag.id);
+    }
+  }
+
+  // 9. Log the result
+  logger.info(
+    `Tag sync: ${store.tagMap.size} labels mapped to Discord tags (${store.availableTags.length}/${TAG_BUDGET.total} tag slots used)`,
+  );
 }
