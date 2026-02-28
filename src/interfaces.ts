@@ -12,6 +12,8 @@ interface Thread {
   locked: boolean | null;
   lockArchiving?: boolean;
   lockLocking?: boolean;
+  lockTagging?: boolean;
+  lockLabeling?: boolean;
 }
 
 interface ThreadComment {

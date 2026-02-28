@@ -4,6 +4,7 @@ import { Thread } from "./interfaces";
 class Store {
   threads: Thread[] = [];
   availableTags: GuildForumTag[] = [];
+  tagMap: Map<string, string> = new Map();
 
   deleteThread(id: string | undefined) {
     const index = this.threads.findIndex((obj) => obj.id === id);
