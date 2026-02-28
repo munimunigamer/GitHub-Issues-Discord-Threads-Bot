@@ -23,6 +23,7 @@ import {
 import { logger } from "../logger";
 import { store } from "../store";
 import { Thread } from "../interfaces";
+import { syncLabelsToTags } from "./discordActions";
 
 export async function handleClientReady(client: Client) {
   logger.info(`Logged in as ${client.user?.tag}!`);
@@ -56,9 +57,18 @@ export async function handleClientReady(client: Client) {
 
   logger.info(`Issues loaded : ${store.threads.length}`);
 
-  client.channels.fetch(config.DISCORD_CHANNEL_ID).then((params) => {
-    store.availableTags = (params as ForumChannel).availableTags;
-  });
+  const forumChannel = (await client.channels.fetch(
+    config.DISCORD_CHANNEL_ID,
+  )) as ForumChannel;
+  store.availableTags = forumChannel.availableTags;
+
+  try {
+    await syncLabelsToTags();
+  } catch (err) {
+    logger.error(
+      `Tag sync failed during startup: ${err instanceof Error ? err.message : "Unknown error"}`,
+    );
+  }
 }
 
 export async function handleThreadCreate(params: AnyThreadChannel) {
