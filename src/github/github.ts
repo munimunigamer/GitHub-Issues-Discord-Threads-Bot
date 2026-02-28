@@ -4,9 +4,11 @@ import {
   handleClosed,
   handleCreated,
   handleDeleted,
+  handleLabeled,
   handleLocked,
   handleOpened,
   handleReopened,
+  handleUnlabeled,
   handleUnlocked,
 } from "./githubHandlers";
 
@@ -18,21 +20,26 @@ export function initGithub() {
     res.json({ msg: "github webhooks work" });
   });
 
-  const githubActions: {
+  const githubHandlers: {
     [key: string]: GithubHandlerFunction;
   } = {
-    opened: (req) => handleOpened(req),
-    created: (req) => handleCreated(req),
-    closed: (req) => handleClosed(req),
-    reopened: (req) => handleReopened(req),
-    locked: (req) => handleLocked(req),
-    unlocked: (req) => handleUnlocked(req),
-    deleted: (req) => handleDeleted(req),
+    "issues.opened": (req) => handleOpened(req),
+    "issues.closed": (req) => handleClosed(req),
+    "issues.reopened": (req) => handleReopened(req),
+    "issues.locked": (req) => handleLocked(req),
+    "issues.unlocked": (req) => handleUnlocked(req),
+    "issues.deleted": (req) => handleDeleted(req),
+    "issues.labeled": (req) => handleLabeled(req),
+    "issues.unlabeled": (req) => handleUnlabeled(req),
+    "issue_comment.created": (req) => handleCreated(req),
   };
 
   app.post("/", async (req, res) => {
-    const githubAction = githubActions[req.body.action];
-    githubAction && githubAction(req);
+    const event = req.headers["x-github-event"] as string;
+    const action = req.body.action as string;
+    const key = `${event}.${action}`;
+    const handler = githubHandlers[key];
+    handler && handler(req);
     res.json({ msg: "ok" });
   });
 

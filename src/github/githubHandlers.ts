@@ -76,3 +76,11 @@ export async function handleDeleted(req: Request) {
   const node_id = await getIssueNodeId(req);
   deleteThread(node_id);
 }
+
+export async function handleLabeled(req: Request) {
+  // TODO: Implemented in plan 01-03 (bidirectional tag sync)
+}
+
+export async function handleUnlabeled(req: Request) {
+  // TODO: Implemented in plan 01-03 (bidirectional tag sync)
+}
