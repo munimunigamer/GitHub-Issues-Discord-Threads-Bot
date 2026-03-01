@@ -41,11 +41,22 @@ export async function createThread({
       config.DISCORD_CHANNEL_ID,
     ) as ForumChannel;
 
+    // LINK-02: Append [#N] suffix to thread title
+    const suffix = ` [#${number}]`;
+    const maxBase = 100 - suffix.length;
+    const suffixedTitle =
+      title.length + suffix.length > 100
+        ? title.slice(0, maxBase) + suffix
+        : title + suffix;
+
+    // LINK-01: Include GitHub issue URL in first message
+    const issueUrl = `https://github.com/${config.GITHUB_USERNAME}/${config.GITHUB_REPOSITORY}/issues/${number}`;
+
     const forumThread = await forum.threads.create({
       message: {
-        content: `**${login}** opened this issue on GitHub:\n\n${body || "*No description provided.*"}`,
+        content: `**${login}** opened this issue on GitHub: ${issueUrl}\n\n${body || "*No description provided.*"}`,
       },
-      name: title,
+      name: suffixedTitle,
       appliedTags,
     });
 
@@ -58,11 +69,12 @@ export async function createThread({
       store.threads[existingIndex].node_id = node_id;
       store.threads[existingIndex].number = number;
       store.threads[existingIndex].body = body;
+      store.threads[existingIndex].title = suffixedTitle;
     } else {
       // handleThreadCreate hasn't fired yet -- add it directly
       store.threads.push({
         id: forumThread.id,
-        title,
+        title: suffixedTitle,
         appliedTags: [...forumThread.appliedTags],
         node_id,
         number,
