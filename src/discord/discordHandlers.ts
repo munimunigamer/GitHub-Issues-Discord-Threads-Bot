@@ -29,6 +29,7 @@ import { Thread } from "../interfaces";
 import {
   syncLabelsToTags,
   syncKanbanTags,
+  resetOpinionatedTags,
   enrichThreadAfterIssueCreation,
 } from "./discordActions";
 
@@ -70,10 +71,10 @@ export async function handleClientReady(client: Client) {
   store.availableTags = forumChannel.availableTags;
 
   try {
-    await syncLabelsToTags();
+    await resetOpinionatedTags();
   } catch (err) {
     logger.error(
-      `Tag sync failed during startup: ${err instanceof Error ? err.message : "Unknown error"}`,
+      `Tag reset failed during startup: ${err instanceof Error ? err.message : "Unknown error"}`,
     );
   }
 

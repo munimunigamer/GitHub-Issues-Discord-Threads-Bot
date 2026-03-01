@@ -19,9 +19,29 @@ import client from "./discord";
 
 const TAG_BUDGET = {
   total: 20, // Discord hard limit
-  labels: 17, // For GitHub label sync
-  reserved: 3, // For future kanban columns (Phase 5) and user tags
+  opinionated: 14, // Max opinionated tags
+  kanban: 6, // Max kanban column tags (20 - opinionated)
 };
+
+const OPINIONATED_TAGS: { name: string; moderated?: boolean }[] = [
+  // Issue type
+  { name: "Bug" },
+  { name: "Feature" },
+  { name: "Question" },
+  { name: "Discussion" },
+  // Priority (moderator-only)
+  { name: "Critical", moderated: true },
+  { name: "High Priority", moderated: true },
+  { name: "Low Priority" },
+  // Status (moderator-only)
+  { name: "Needs Triage", moderated: true },
+  { name: "Accepted", moderated: true },
+  { name: "Won't Fix", moderated: true },
+  // Meta
+  { name: "Good First Issue" },
+  { name: "Help Wanted" },
+  { name: "Duplicate", moderated: true },
+];
 
 const info = (action: ActionValue, thread: Thread) =>
   logger.info(`${Triggerer.Github} | ${action} | ${getDiscordUrl(thread)}`);
@@ -360,6 +380,21 @@ export async function removeTagFromThread(node_id: string, tagId: string) {
   info(Actions.Untagged, thread);
 }
 
+export async function resetOpinionatedTags() {
+  const forum = (await client.channels.fetch(
+    config.DISCORD_CHANNEL_ID,
+  )) as ForumChannel;
+
+  await forum.setAvailableTags(OPINIONATED_TAGS);
+
+  const refreshed = await forum.fetch();
+  store.availableTags = refreshed.availableTags;
+
+  logger.info(
+    `Tag reset: ${store.availableTags.length} opinionated tags set (${store.availableTags.length}/${TAG_BUDGET.total} slots used)`,
+  );
+}
+
 export async function syncLabelsToTags() {
   // 1. Fetch GitHub labels
   const { data: labels } = await octokit.rest.issues.listLabelsForRepo({
@@ -402,12 +437,12 @@ export async function syncLabelsToTags() {
 
   // 5. Calculate available slots and enforce budget
   const usedSlots = existingTags.length;
-  const availableSlots = Math.max(0, TAG_BUDGET.labels - usedSlots);
+  const availableSlots = Math.max(0, TAG_BUDGET.opinionated - usedSlots);
 
   const labelsToSync = newLabels.slice(0, availableSlots);
   if (labelsToSync.length < newLabels.length) {
     logger.warn(
-      `Tag budget: ${newLabels.length - labelsToSync.length} labels cannot be synced as Discord tags (${TAG_BUDGET.labels}-tag budget, ${usedSlots} slots used)`,
+      `Tag budget: ${newLabels.length - labelsToSync.length} labels cannot be synced as Discord tags (${TAG_BUDGET.opinionated}-tag budget, ${usedSlots} slots used)`,
     );
   }
 
@@ -449,12 +484,12 @@ export async function syncKanbanTags(columns: ProjectColumn[]) {
 
   const existingTagNames = new Set(existingTags.map((t) => t.name));
 
-  const kanbanSlots = Math.min(columns.length, TAG_BUDGET.reserved);
+  const kanbanSlots = Math.min(columns.length, TAG_BUDGET.kanban);
   const columnsToSync = columns.slice(0, kanbanSlots);
 
-  if (columns.length > TAG_BUDGET.reserved) {
+  if (columns.length > TAG_BUDGET.kanban) {
     logger.warn(
-      `Kanban: Project has ${columns.length} status columns but only ${TAG_BUDGET.reserved} reserved tag slots. Only syncing first ${TAG_BUDGET.reserved}.`,
+      `Kanban: Project has ${columns.length} status columns but only ${TAG_BUDGET.kanban} reserved tag slots. Only syncing first ${TAG_BUDGET.kanban}.`,
     );
   }
 
