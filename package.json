@@ -11,6 +11,7 @@
     "lint": "eslint . --ext ts --fix",
     "forward": "ssh -R 80:localhost:5000 serveo.net"
   },
+  "packageManager": "pnpm@10.30.3",
   "author": "Nicat",
   "license": "MIT",
   "dependencies": {
