@@ -21,13 +21,18 @@ async function getIssueNodeId(req: Request): Promise<string | undefined> {
 
 export async function handleOpened(req: Request) {
   if (!req.body.issue) return;
-  const { node_id, number, title, user, body } = req.body.issue;
+  const { node_id, number, title, user, body, labels } = req.body.issue;
   if (store.threads.some((thread) => thread.node_id === node_id)) return;
 
   const { login } = user;
 
-  // Phase 6: Tags are opinionated and not derived from GitHub labels
-  createThread({ login, appliedTags: [], number, title, body, node_id });
+  // Map opinionated labels to Discord tag IDs
+  const appliedTags = (labels || [])
+    .map((label: { name: string }) => store.tagMap.get(label.name))
+    .filter((tagId: string | undefined): tagId is string => tagId !== undefined)
+    .slice(0, 5); // Discord 5-tag limit
+
+  createThread({ login, appliedTags, number, title, body, node_id });
 }
 
 export async function handleCreated(req: Request) {

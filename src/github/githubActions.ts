@@ -182,6 +182,7 @@ export async function unlockIssue(thread: Thread) {
 
 export async function createIssue(thread: Thread, params: Message) {
   const { title, number } = thread;
+  const { appliedTags } = thread;
 
   if (number) {
     error("Thread already has an issue number", thread);
@@ -190,10 +191,22 @@ export async function createIssue(thread: Thread, params: Message) {
 
   try {
     const body = getIssueBody(params);
+
+    // Map opinionated Discord tags to GitHub label names
+    const labels = appliedTags
+      .map((tagId) => {
+        for (const [name, id] of store.tagMap.entries()) {
+          if (id === tagId) return name;
+        }
+        return undefined;
+      })
+      .filter((name): name is string => name !== undefined);
+
     const response = await octokit.rest.issues.create({
       ...repoCredentials,
       title,
       body,
+      labels,
     });
 
     if (response && response.data) {
