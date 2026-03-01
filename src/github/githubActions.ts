@@ -2,7 +2,7 @@ import { graphql } from "@octokit/graphql";
 import { Octokit } from "@octokit/rest";
 import { Attachment, Collection, Message } from "discord.js";
 import { config } from "../config";
-import { GitIssue, Thread } from "../interfaces";
+import { GitIssue, ProjectColumn, Thread } from "../interfaces";
 import {
   ActionValue,
   Actions,
@@ -381,5 +381,96 @@ async function fillCommentsData() {
     } else {
       error("Failed to load comments due to an unknown error");
     }
+  }
+}
+
+export async function discoverProject(): Promise<{
+  projectId: string;
+  projectTitle: string;
+  statusFieldId: string;
+  columns: ProjectColumn[];
+} | null> {
+  try {
+    const result: any = await graphqlWithAuth(
+      `query($owner: String!, $repo: String!) {
+        repository(owner: $owner, name: $repo) {
+          projectsV2(first: 1) {
+            nodes {
+              id
+              title
+              number
+              fields(first: 20) {
+                nodes {
+                  ... on ProjectV2SingleSelectField {
+                    id
+                    name
+                    options {
+                      id
+                      name
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }`,
+      {
+        owner: config.GITHUB_USERNAME,
+        repo: config.GITHUB_REPOSITORY,
+      },
+    );
+
+    const project = result.repository?.projectsV2?.nodes?.[0];
+    if (!project) {
+      logger.warn(
+        "Kanban: No GitHub Project found for repository. Kanban sync disabled.",
+      );
+      return null;
+    }
+
+    const { id: projectId, title, number: projectNumber, fields } = project;
+
+    const statusField = fields.nodes.find(
+      (f: any) => f.name?.toLowerCase() === "status" && f.options,
+    );
+    if (!statusField) {
+      logger.warn(
+        "Kanban: No Status field found in project. Kanban sync disabled.",
+      );
+      return null;
+    }
+
+    const columns: ProjectColumn[] = statusField.options.map(
+      (opt: { id: string; name: string }) => ({
+        id: opt.id,
+        name: opt.name,
+      }),
+    );
+
+    logger.info(
+      `Kanban: Auto-detected project "${title}" (#${projectNumber}) with ${columns.length} status columns`,
+    );
+
+    return {
+      projectId,
+      projectTitle: title,
+      statusFieldId: statusField.id,
+      columns,
+    };
+  } catch (err) {
+    if (
+      err instanceof Error &&
+      err.message.includes("Resource not accessible")
+    ) {
+      logger.warn(
+        "Kanban: GitHub token may need 'read:project' scope. Kanban sync disabled.",
+      );
+    } else {
+      logger.error(
+        `Kanban: Failed to discover project: ${err instanceof Error ? err.message : "Unknown error"}`,
+      );
+    }
+    return null;
   }
 }

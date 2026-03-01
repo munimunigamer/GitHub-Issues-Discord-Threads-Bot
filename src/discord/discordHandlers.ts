@@ -16,6 +16,7 @@ import {
   createIssueComment,
   deleteComment,
   deleteIssue,
+  discoverProject,
   getIssues,
   lockIssue,
   openIssue,
@@ -27,6 +28,7 @@ import { store } from "../store";
 import { Thread } from "../interfaces";
 import {
   syncLabelsToTags,
+  syncKanbanTags,
   enrichThreadAfterIssueCreation,
 } from "./discordActions";
 
@@ -72,6 +74,20 @@ export async function handleClientReady(client: Client) {
   } catch (err) {
     logger.error(
       `Tag sync failed during startup: ${err instanceof Error ? err.message : "Unknown error"}`,
+    );
+  }
+
+  try {
+    const project = await discoverProject();
+    if (project) {
+      store.projectId = project.projectId;
+      store.statusFieldId = project.statusFieldId;
+      store.kanbanColumns = project.columns;
+      await syncKanbanTags(project.columns);
+    }
+  } catch (err) {
+    logger.error(
+      `Kanban init failed: ${err instanceof Error ? err.message : "Unknown error"}`,
     );
   }
 }

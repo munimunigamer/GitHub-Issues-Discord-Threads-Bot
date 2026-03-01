@@ -5,7 +5,7 @@ import {
   ThreadChannel,
 } from "discord.js";
 import { config } from "../config";
-import { Thread } from "../interfaces";
+import { ProjectColumn, Thread } from "../interfaces";
 import { octokit, repoCredentials } from "../github/githubActions";
 import {
   ActionValue,
@@ -438,6 +438,68 @@ export async function syncLabelsToTags() {
   // 9. Log the result
   logger.info(
     `Tag sync: ${store.tagMap.size} labels mapped to Discord tags (${store.availableTags.length}/${TAG_BUDGET.total} tag slots used)`,
+  );
+}
+
+export async function syncKanbanTags(columns: ProjectColumn[]) {
+  const forum = (await client.channels.fetch(
+    config.DISCORD_CHANNEL_ID,
+  )) as ForumChannel;
+  const existingTags = forum.availableTags;
+
+  const existingTagNames = new Set(existingTags.map((t) => t.name));
+
+  const kanbanSlots = Math.min(columns.length, TAG_BUDGET.reserved);
+  const columnsToSync = columns.slice(0, kanbanSlots);
+
+  if (columns.length > TAG_BUDGET.reserved) {
+    logger.warn(
+      `Kanban: Project has ${columns.length} status columns but only ${TAG_BUDGET.reserved} reserved tag slots. Only syncing first ${TAG_BUDGET.reserved}.`,
+    );
+  }
+
+  // Filter columns that don't already exist as tags
+  const newColumnTags = columnsToSync
+    .filter((col) => !existingTagNames.has(col.name.slice(0, 20)))
+    .map((col) => {
+      const truncated = col.name.slice(0, 20);
+      if (col.name.length > 20) {
+        logger.warn(
+          `Kanban: Column name "${col.name}" truncated to "${truncated}" for Discord tag`,
+        );
+      }
+      return { name: truncated };
+    });
+
+  // Check total budget
+  if (existingTags.length + newColumnTags.length > TAG_BUDGET.total) {
+    logger.warn(
+      `Kanban: Cannot create ${newColumnTags.length} kanban tags -- would exceed ${TAG_BUDGET.total}-tag Discord limit (${existingTags.length} already used)`,
+    );
+    return;
+  }
+
+  // Create new tags if any
+  if (newColumnTags.length > 0) {
+    await forum.setAvailableTags([...existingTags, ...newColumnTags]);
+  }
+
+  // Refresh the forum and update store
+  const refreshed = await forum.fetch();
+  store.availableTags = refreshed.availableTags;
+
+  // Populate kanbanTagMap
+  store.kanbanTagMap.clear();
+  for (const col of columnsToSync) {
+    const truncated = col.name.slice(0, 20);
+    const matchingTag = store.availableTags.find((t) => t.name === truncated);
+    if (matchingTag) {
+      store.kanbanTagMap.set(col.name, matchingTag.id);
+    }
+  }
+
+  logger.info(
+    `Kanban: ${store.kanbanTagMap.size} column tags synced (${store.availableTags.length}/${TAG_BUDGET.total} tag slots used)`,
   );
 }
 
