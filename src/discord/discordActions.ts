@@ -54,6 +54,19 @@ export function extractImageUrls(markdown: string): string[] {
 }
 
 /**
+ * IMG-02: Strip image syntax (markdown and HTML) from text so Discord
+ * doesn't show raw tags alongside the embeds.
+ */
+export function stripImageSyntax(markdown: string): string {
+  if (!markdown) return markdown;
+  return markdown
+    .replace(/!\[([^\]]*)\]\(([^\s)]+)(?:\s+"[^"]*")?\)/g, "")
+    .replace(/<img\s[^>]*src=["'][^"']+["'][^>]*\/?>/gi, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+/**
  * IMG-02: Create Discord embed objects for image URLs.
  * Discord supports up to 10 embeds per message; slices to 10 if more.
  */
@@ -92,12 +105,14 @@ export async function createThread({
     // LINK-01: Include GitHub issue URL in first message
     const issueUrl = `https://github.com/${config.GITHUB_USERNAME}/${config.GITHUB_REPOSITORY}/issues/${number}`;
 
-    // IMG-02: Extract image URLs from body and create embeds
-    const imageEmbeds = body ? createImageEmbeds(extractImageUrls(body)) : [];
+    // IMG-02: Extract image URLs from body, create embeds, and strip image tags from text
+    const imageUrls = body ? extractImageUrls(body) : [];
+    const imageEmbeds = createImageEmbeds(imageUrls);
+    const displayBody = imageUrls.length > 0 ? stripImageSyntax(body) : body;
 
     const forumThread = await forum.threads.create({
       message: {
-        content: `**${login}** opened this issue on GitHub: ${issueUrl}\n\n${body || "*No description provided.*"}`,
+        content: `**${login}** opened this issue on GitHub: ${issueUrl}\n\n${displayBody || "*No description provided.*"}`,
         ...(imageEmbeds.length > 0 && { embeds: imageEmbeds }),
       },
       name: suffixedTitle,
@@ -163,14 +178,16 @@ export async function createComment({
   const { thread, channel } = await getThreadChannel(node_id);
   if (!thread || !channel) return;
 
-  // IMG-02: Extract image URLs from body and create embeds
-  const imageEmbeds = body ? createImageEmbeds(extractImageUrls(body)) : [];
+  // IMG-02: Extract image URLs from body, create embeds, and strip image tags from text
+  const imageUrls = body ? extractImageUrls(body) : [];
+  const imageEmbeds = createImageEmbeds(imageUrls);
+  const displayBody = imageUrls.length > 0 ? stripImageSyntax(body) : body;
 
   channel.parent
     ?.createWebhook({ name: login, avatar: avatar_url })
     .then((webhook) => {
       const messagePayload = MessagePayload.create(webhook, {
-        content: body,
+        content: displayBody,
         threadId: thread.id,
         ...(imageEmbeds.length > 0 && { embeds: imageEmbeds }),
       }).resolveBody();
