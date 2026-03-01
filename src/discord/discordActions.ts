@@ -21,7 +21,7 @@ const TAG_BUDGET = {
 const info = (action: ActionValue, thread: Thread) =>
   logger.info(`${Triggerer.Github} | ${action} | ${getDiscordUrl(thread)}`);
 
-export function createThread({
+export async function createThread({
   body,
   login,
   title,
@@ -36,27 +36,59 @@ export function createThread({
   node_id: string;
   number: number;
 }) {
-  const forum = client.channels.cache.get(
-    config.DISCORD_CHANNEL_ID,
-  ) as ForumChannel;
-  forum.threads
-    .create({
+  try {
+    const forum = client.channels.cache.get(
+      config.DISCORD_CHANNEL_ID,
+    ) as ForumChannel;
+
+    const forumThread = await forum.threads.create({
       message: {
-        content: body + "/" + login, // TODO
+        content: `**${login}** opened this issue on GitHub:\n\n${body || "*No description provided.*"}`,
       },
       name: title,
       appliedTags,
-    })
-    .then(({ id }) => {
-      const thread = store.threads.find((thread) => thread.id === id);
-      if (!thread) return;
-
-      thread.body = body;
-      thread.node_id = node_id;
-      thread.number = number;
-
-      info(Actions.Created, thread);
     });
+
+    // Directly register in store -- don't rely on handleThreadCreate
+    const existingIndex = store.threads.findIndex(
+      (t) => t.id === forumThread.id,
+    );
+    if (existingIndex !== -1) {
+      // handleThreadCreate already added it -- patch it
+      store.threads[existingIndex].node_id = node_id;
+      store.threads[existingIndex].number = number;
+      store.threads[existingIndex].body = body;
+    } else {
+      // handleThreadCreate hasn't fired yet -- add it directly
+      store.threads.push({
+        id: forumThread.id,
+        title,
+        appliedTags: [...forumThread.appliedTags],
+        node_id,
+        number,
+        body,
+        comments: [],
+        archived: false,
+        locked: false,
+      });
+    }
+
+    // Write Discord URL back to GitHub issue body for restart recovery
+    const discordUrl = `https://discord.com/channels/${forum.guildId}/${forumThread.id}/${forumThread.id}`;
+    const updatedBody = `${body || ""}\n\n---\n[View on Discord](${discordUrl})`;
+    await octokit.rest.issues.update({
+      ...repoCredentials,
+      issue_number: number,
+      body: updatedBody,
+    });
+
+    const thread = store.threads.find((t) => t.id === forumThread.id);
+    if (thread) info(Actions.Created, thread);
+  } catch (err) {
+    logger.error(
+      `Failed to create thread: ${err instanceof Error ? err.message : "Unknown error"}`,
+    );
+  }
 }
 
 export async function createComment({
