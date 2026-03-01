@@ -10,6 +10,7 @@ import {
 } from "discord.js";
 import { config } from "../config";
 import {
+  addLabelsToIssue,
   closeIssue,
   createIssue,
   createIssueComment,
@@ -19,6 +20,7 @@ import {
   getIssues,
   lockIssue,
   openIssue,
+  removeLabelFromIssue,
   unlockIssue,
 } from "../github/githubActions";
 import { logger } from "../logger";
@@ -127,6 +129,11 @@ export async function handleChannelUpdate(
   }
 }
 
+function arraysEqual(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((val, idx) => val === b[idx]);
+}
+
 export async function handleThreadUpdate(
   oldThread: AnyThreadChannel,
   newThread: AnyThreadChannel,
@@ -137,14 +144,53 @@ export async function handleThreadUpdate(
   const thread = store.threads.find((item) => item.id === id);
   if (!thread) return;
 
-  // Update applied tags in store
+  // --- Tag change detection ---
+  const oldTags = thread.appliedTags;
   const currentTags = [...newThread.appliedTags];
 
-  // Reset lockTagging if set (echo suppression for kanban)
+  if (!thread.lockTagging && !arraysEqual(oldTags, currentTags)) {
+    thread.appliedTags = currentTags; // Update store immediately
+
+    const added = currentTags.filter((t) => !oldTags.includes(t));
+    const removed = oldTags.filter((t) => !currentTags.includes(t));
+
+    // Convert tag IDs to label names using store.tagMap (reverse lookup)
+    // Only opinionated tags have entries in tagMap, so non-opinionated tags are automatically ignored
+    const addedLabels = added
+      .map((id) => {
+        for (const [name, tagId] of store.tagMap.entries()) {
+          if (tagId === id) return name;
+        }
+        return undefined;
+      })
+      .filter((name): name is string => name !== undefined);
+
+    const removedLabels = removed
+      .map((id) => {
+        for (const [name, tagId] of store.tagMap.entries()) {
+          if (tagId === id) return name;
+        }
+        return undefined;
+      })
+      .filter((name): name is string => name !== undefined);
+
+    if (addedLabels.length > 0) {
+      thread.lockLabeling = true;
+      await addLabelsToIssue(thread, addedLabels);
+    }
+    if (removedLabels.length > 0) {
+      thread.lockLabeling = true;
+      for (const label of removedLabels) {
+        await removeLabelFromIssue(thread, label);
+      }
+    }
+  }
+
+  // Reset lockTagging if it was set (echo suppression for kanban and label sync)
   if (thread.lockTagging) {
     thread.lockTagging = false;
+    thread.appliedTags = currentTags; // Still update store
   }
-  thread.appliedTags = currentTags;
 
   if (thread.locked !== locked && !thread.lockLocking) {
     if (thread.archived) {

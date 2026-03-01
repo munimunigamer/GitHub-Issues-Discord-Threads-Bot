@@ -282,6 +282,56 @@ export async function deleteComment(thread: Thread, comment_id: number) {
   }
 }
 
+export async function addLabelsToIssue(thread: Thread, labels: string[]) {
+  const { number: issue_number } = thread;
+
+  if (!issue_number) {
+    error("Thread does not have an issue number", thread);
+    return;
+  }
+
+  try {
+    await octokit.rest.issues.addLabels({
+      ...repoCredentials,
+      issue_number,
+      labels,
+    });
+
+    labels.forEach(() => info(Actions.Tagged, thread));
+  } catch (err) {
+    if (err instanceof Error) {
+      error(`Failed to add labels: ${err.message}`, thread);
+    } else {
+      error("Failed to add labels due to an unknown error", thread);
+    }
+  }
+}
+
+export async function removeLabelFromIssue(thread: Thread, label: string) {
+  const { number: issue_number } = thread;
+
+  if (!issue_number) {
+    error("Thread does not have an issue number", thread);
+    return;
+  }
+
+  try {
+    await octokit.rest.issues.removeLabel({
+      ...repoCredentials,
+      issue_number,
+      name: label,
+    });
+
+    info(Actions.Untagged, thread);
+  } catch (err) {
+    if (err instanceof Error) {
+      error(`Failed to remove label: ${err.message}`, thread);
+    } else {
+      error("Failed to remove label due to an unknown error", thread);
+    }
+  }
+}
+
 export async function getIssues() {
   try {
     const response = await octokit.rest.issues.listForRepo({
