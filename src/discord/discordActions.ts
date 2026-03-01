@@ -123,7 +123,7 @@ export async function createThread({
         : title + suffix;
 
     // LINK-01: Include GitHub issue URL in first message
-    const issueUrl = `https://github.com/${config.GITHUB_USERNAME}/${config.GITHUB_REPOSITORY}/issues/${number}`;
+    const issueUrl = `https://github.com/${config.GITHUB_OWNER}/${config.GITHUB_REPOSITORY}/issues/${number}`;
 
     // IMG-02: Extract image URLs from body, create embeds, and strip image tags from text
     const imageUrls = body ? extractImageUrls(body) : [];
@@ -565,7 +565,7 @@ export async function enrichThreadAfterIssueCreation(thread: Thread) {
     thread.title = newName;
 
     // LINK-01: Send bot message with GitHub issue URL
-    const issueUrl = `https://github.com/${config.GITHUB_USERNAME}/${config.GITHUB_REPOSITORY}/issues/${thread.number}`;
+    const issueUrl = `https://github.com/${config.GITHUB_OWNER}/${config.GITHUB_REPOSITORY}/issues/${thread.number}`;
     await channel.send(`GitHub issue created: ${issueUrl}`);
 
     // LINK-03: Append Discord URL to GitHub issue body

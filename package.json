@@ -14,7 +14,7 @@
   "author": "Nicat",
   "license": "MIT",
   "dependencies": {
-    "@octokit/graphql": "^7.1.0",
+    "@octokit/auth-app": "^7.1.1",
     "@octokit/rest": "^20.1.1",
     "discord.js": "^14.15.3",
     "dotenv": "^16.4.5",

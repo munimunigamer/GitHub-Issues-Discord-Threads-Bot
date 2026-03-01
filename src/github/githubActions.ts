@@ -1,4 +1,4 @@
-import { graphql } from "@octokit/graphql";
+import { createAppAuth } from "@octokit/auth-app";
 import { Octokit } from "@octokit/rest";
 import { Attachment, Collection, Message } from "discord.js";
 import { config } from "../config";
@@ -13,18 +13,16 @@ import {
 import { store } from "../store";
 
 export const octokit = new Octokit({
-  auth: config.GITHUB_ACCESS_TOKEN,
-  baseUrl: "https://api.github.com",
-});
-
-const graphqlWithAuth = graphql.defaults({
-  headers: {
-    authorization: `token  ${process.env.GITHUB_ACCESS_TOKEN}`,
+  authStrategy: createAppAuth,
+  auth: {
+    appId: config.GITHUB_APP_ID,
+    privateKey: config.GITHUB_APP_PRIVATE_KEY,
+    installationId: config.GITHUB_APP_INSTALLATION_ID,
   },
 });
 
 export const repoCredentials = {
-  owner: config.GITHUB_USERNAME,
+  owner: config.GITHUB_OWNER,
   repo: config.GITHUB_REPOSITORY,
 };
 
@@ -266,7 +264,7 @@ export async function deleteIssue(thread: Thread) {
   }
 
   try {
-    await graphqlWithAuth(
+    await octokit.graphql(
       `mutation {deleteIssue(input: {issueId: "${node_id}"}) {clientMutationId}}`,
     );
     info(Actions.Deleted, thread);
@@ -403,7 +401,7 @@ export async function discoverProject(): Promise<{
   columns: ProjectColumn[];
 } | null> {
   try {
-    const result: any = await graphqlWithAuth(
+    const result: any = await octokit.graphql(
       `query($owner: String!, $repo: String!) {
         repository(owner: $owner, name: $repo) {
           projectsV2(first: 1) {
@@ -428,7 +426,7 @@ export async function discoverProject(): Promise<{
         }
       }`,
       {
-        owner: config.GITHUB_USERNAME,
+        owner: config.GITHUB_OWNER,
         repo: config.GITHUB_REPOSITORY,
       },
     );

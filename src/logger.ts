@@ -49,5 +49,5 @@ export const getDiscordUrl = (thread: Thread) => {
 };
 
 export const getGithubUrl = (thread: Thread) => {
-  return `https://github.com/${config.GITHUB_USERNAME}/${config.GITHUB_REPOSITORY}/issues/${thread.number}`;
+  return `https://github.com/${config.GITHUB_OWNER}/${config.GITHUB_REPOSITORY}/issues/${thread.number}`;
 };
