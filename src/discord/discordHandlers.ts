@@ -76,6 +76,9 @@ export async function handleClientReady(client: Client) {
 export async function handleThreadCreate(params: AnyThreadChannel) {
   if (params.parentId !== config.DISCORD_CHANNEL_ID) return;
 
+  // Skip if already tracked (bot just created this thread via createThread)
+  if (store.threads.some((t) => t.id === params.id)) return;
+
   const { id, name, appliedTags } = params;
 
   store.threads.push({
