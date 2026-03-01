@@ -1,4 +1,6 @@
+import crypto from "crypto";
 import express from "express";
+import { config } from "../config";
 import { GithubHandlerFunction } from "../interfaces";
 import {
   handleClosed,
@@ -14,7 +16,22 @@ import {
 } from "./githubHandlers";
 
 const app = express();
+// Use raw body so we can verify the webhook signature before parsing
 app.use(express.json());
+
+function verifySignature(
+  payload: string,
+  signature: string | undefined,
+): boolean {
+  if (!signature) return false;
+  const expected =
+    "sha256=" +
+    crypto
+      .createHmac("sha256", config.GITHUB_WEBHOOK_SECRET)
+      .update(payload)
+      .digest("hex");
+  return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
+}
 
 export function initGithub() {
   app.get("", (_, res) => {
@@ -37,6 +54,14 @@ export function initGithub() {
   };
 
   app.post("/", async (req, res) => {
+    const signature = req.headers["x-hub-signature-256"] as string | undefined;
+    const payload = JSON.stringify(req.body);
+
+    if (!verifySignature(payload, signature)) {
+      res.status(401).json({ msg: "invalid signature" });
+      return;
+    }
+
     const event = req.headers["x-github-event"] as string;
     const action = req.body.action as string;
     const key = `${event}.${action}`;
