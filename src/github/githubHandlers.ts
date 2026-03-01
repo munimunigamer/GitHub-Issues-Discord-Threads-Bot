@@ -1,10 +1,12 @@
 import { Request } from "express";
 import {
+  addTagToThread,
   archiveThread,
   createComment,
   createThread,
   deleteThread,
   lockThread,
+  removeTagFromThread,
   unarchiveThread,
   unlockThread,
   updateKanbanTag,
@@ -71,6 +73,48 @@ export async function handleUnlocked(req: Request) {
 export async function handleDeleted(req: Request) {
   const node_id = await getIssueNodeId(req);
   deleteThread(node_id);
+}
+
+export async function handleLabeled(req: Request) {
+  const { node_id } = req.body.issue;
+  const label = req.body.label;
+  if (!label || !node_id) return;
+
+  const thread = store.threads.find((t) => t.node_id === node_id);
+  if (!thread) return;
+
+  // Echo suppression: skip if this label change was initiated by the bot
+  if (thread.lockLabeling) {
+    thread.lockLabeling = false;
+    return;
+  }
+
+  // Only sync opinionated tags -- silently ignore non-opinionated labels
+  const tagId = store.tagMap.get(label.name);
+  if (!tagId) return;
+
+  await addTagToThread(node_id, tagId);
+}
+
+export async function handleUnlabeled(req: Request) {
+  const { node_id } = req.body.issue;
+  const label = req.body.label;
+  if (!label || !node_id) return;
+
+  const thread = store.threads.find((t) => t.node_id === node_id);
+  if (!thread) return;
+
+  // Echo suppression: skip if this label change was initiated by the bot
+  if (thread.lockLabeling) {
+    thread.lockLabeling = false;
+    return;
+  }
+
+  // Only sync opinionated tags -- silently ignore non-opinionated labels
+  const tagId = store.tagMap.get(label.name);
+  if (!tagId) return;
+
+  await removeTagFromThread(node_id, tagId);
 }
 
 export async function handleProjectItemEdited(req: Request) {
