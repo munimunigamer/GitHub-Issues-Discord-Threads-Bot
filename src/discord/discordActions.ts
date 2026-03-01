@@ -503,6 +503,63 @@ export async function syncKanbanTags(columns: ProjectColumn[]) {
   );
 }
 
+export async function updateKanbanTag(
+  contentNodeId: string,
+  oldColumnName: string | undefined,
+  newColumnName: string,
+) {
+  const { thread, channel } = await getThreadChannel(contentNodeId);
+  if (!thread || !channel) return;
+
+  // Look up old and new tag IDs from kanbanTagMap
+  const oldTagId = oldColumnName
+    ? store.kanbanTagMap.get(oldColumnName)
+    : undefined;
+  const newTagId = store.kanbanTagMap.get(newColumnName);
+
+  if (!newTagId) {
+    logger.warn(
+      `Kanban: No Discord tag found for column "${newColumnName}" -- column may not be synced`,
+    );
+    return;
+  }
+
+  // Build new tags: remove old kanban tag, add new one (never accumulate)
+  let newTags = [...thread.appliedTags];
+  if (oldTagId) {
+    newTags = newTags.filter((t) => t !== oldTagId);
+  }
+
+  if (!newTags.includes(newTagId)) {
+    if (newTags.length >= 5) {
+      logger.warn(
+        `Thread ${thread.title}: Cannot add kanban tag, at 5-tag limit`,
+      );
+      return;
+    }
+    newTags.push(newTagId);
+  }
+
+  // Set lock flag before making Discord API calls
+  thread.lockTagging = true;
+
+  // Handle archived threads: unarchive, modify, re-archive
+  const wasArchived = channel.archived;
+  if (wasArchived) {
+    thread.lockArchiving = true;
+    await channel.setArchived(false);
+  }
+
+  await channel.setAppliedTags(newTags);
+  thread.appliedTags = newTags;
+
+  if (wasArchived) {
+    await channel.setArchived(true);
+  }
+
+  info(Actions.Tagged, thread);
+}
+
 export async function enrichThreadAfterIssueCreation(thread: Thread) {
   if (!thread.number) return;
 

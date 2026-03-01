@@ -7,6 +7,7 @@ import {
   handleLabeled,
   handleLocked,
   handleOpened,
+  handleProjectItemEdited,
   handleReopened,
   handleUnlabeled,
   handleUnlocked,
@@ -32,6 +33,7 @@ export function initGithub() {
     "issues.labeled": (req) => handleLabeled(req),
     "issues.unlabeled": (req) => handleUnlabeled(req),
     "issue_comment.created": (req) => handleCreated(req),
+    "projects_v2_item.edited": (req) => handleProjectItemEdited(req),
   };
 
   app.post("/", async (req, res) => {

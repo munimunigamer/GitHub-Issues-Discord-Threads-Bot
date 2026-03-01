@@ -9,6 +9,7 @@ import {
   removeTagFromThread,
   unarchiveThread,
   unlockThread,
+  updateKanbanTag,
 } from "../discord/discordActions";
 import { GitHubLabel } from "../interfaces";
 import { logger } from "../logger";
@@ -125,4 +126,40 @@ export async function handleUnlabeled(req: Request) {
   if (!tagId) return; // Label doesn't have a corresponding tag, nothing to do
 
   await removeTagFromThread(node_id, tagId);
+}
+
+export async function handleProjectItemEdited(req: Request) {
+  // Guard: kanban disabled (no project detected at startup)
+  if (!store.projectId) return;
+
+  // Guard: must be a field_value change (not a body edit)
+  const changes = req.body.changes;
+  if (!changes?.field_value) return;
+
+  const { field_type, field_name, from, to } = changes.field_value;
+
+  // Guard: only process single_select Status field changes
+  if (field_type !== "single_select") return;
+  if (!field_name || field_name.toLowerCase() !== "status") return;
+
+  // Extract content_node_id (the issue's node_id)
+  const contentNodeId = req.body.projects_v2_item?.content_node_id;
+  if (!contentNodeId) return;
+
+  const oldColumnName: string | undefined = from?.name;
+  const newColumnName: string | undefined = to?.name;
+
+  // Guard: Status was cleared (moved to no column)
+  if (!newColumnName) return;
+
+  logger.info(
+    `Kanban: Issue moved from "${oldColumnName || "(none)"}" to "${newColumnName}"`,
+  );
+
+  await updateKanbanTag(contentNodeId, oldColumnName, newColumnName);
+
+  // If moved to "Done" column, archive the thread
+  if (newColumnName.toLowerCase() === "done") {
+    await archiveThread(contentNodeId);
+  }
 }
