@@ -181,7 +181,7 @@ export async function unlockIssue(thread: Thread) {
 }
 
 export async function createIssue(thread: Thread, params: Message) {
-  const { title, appliedTags, number } = thread;
+  const { title, number } = thread;
 
   if (number) {
     error("Thread already has an issue number", thread);
@@ -189,14 +189,9 @@ export async function createIssue(thread: Thread, params: Message) {
   }
 
   try {
-    const labels = appliedTags?.map(
-      (id) => store.availableTags.find((item) => item.id === id)?.name || "",
-    );
-
     const body = getIssueBody(params);
     const response = await octokit.rest.issues.create({
       ...repoCredentials,
-      labels,
       title,
       body,
     });
