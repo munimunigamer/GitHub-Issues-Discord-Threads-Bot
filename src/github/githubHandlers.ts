@@ -1,12 +1,10 @@
 import { Request } from "express";
 import {
-  addTagToThread,
   archiveThread,
   createComment,
   createThread,
   deleteThread,
   lockThread,
-  removeTagFromThread,
   unarchiveThread,
   unlockThread,
   updateKanbanTag,
@@ -73,53 +71,6 @@ export async function handleUnlocked(req: Request) {
 export async function handleDeleted(req: Request) {
   const node_id = await getIssueNodeId(req);
   deleteThread(node_id);
-}
-
-export async function handleLabeled(req: Request) {
-  const { node_id } = req.body.issue;
-  const label = req.body.label;
-  if (!label || !node_id) return;
-
-  const thread = store.threads.find((t) => t.node_id === node_id);
-  if (!thread) return;
-
-  // Check lockLabeling (echo suppression -- bot just added this label)
-  if (thread.lockLabeling) {
-    thread.lockLabeling = false;
-    return;
-  }
-
-  // Find matching Discord tag using store.tagMap
-  const tagId = store.tagMap.get(label.name);
-  if (!tagId) {
-    logger.warn(
-      `No Discord tag found for label "${label.name}" -- label may not be synced`,
-    );
-    return;
-  }
-
-  await addTagToThread(node_id, tagId);
-}
-
-export async function handleUnlabeled(req: Request) {
-  const { node_id } = req.body.issue;
-  const label = req.body.label;
-  if (!label || !node_id) return;
-
-  const thread = store.threads.find((t) => t.node_id === node_id);
-  if (!thread) return;
-
-  // Check lockLabeling (echo suppression -- bot just removed this label)
-  if (thread.lockLabeling) {
-    thread.lockLabeling = false;
-    return;
-  }
-
-  // Find matching Discord tag using store.tagMap
-  const tagId = store.tagMap.get(label.name);
-  if (!tagId) return; // Label doesn't have a corresponding tag, nothing to do
-
-  await removeTagFromThread(node_id, tagId);
 }
 
 export async function handleProjectItemEdited(req: Request) {

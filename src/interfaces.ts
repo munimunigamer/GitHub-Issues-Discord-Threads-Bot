@@ -13,7 +13,6 @@ interface Thread {
   lockArchiving?: boolean;
   lockLocking?: boolean;
   lockTagging?: boolean;
-  lockLabeling?: boolean;
 }
 
 interface ThreadComment {
@@ -30,16 +29,6 @@ interface GitIssue {
   state: "open" | "closed";
 }
 
-interface GitHubLabel {
-  id: number;
-  node_id: string;
-  url: string;
-  name: string;
-  color: string;
-  default: boolean;
-  description: string;
-}
-
 // eslint-disable-next-line no-unused-vars
 type GithubHandlerFunction = (req: Request) => void;
 
@@ -52,7 +41,6 @@ export {
   Thread,
   ThreadComment,
   GitIssue,
-  GitHubLabel,
   GithubHandlerFunction,
   ProjectColumn,
 };

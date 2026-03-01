@@ -4,12 +4,10 @@ import {
   handleClosed,
   handleCreated,
   handleDeleted,
-  handleLabeled,
   handleLocked,
   handleOpened,
   handleProjectItemEdited,
   handleReopened,
-  handleUnlabeled,
   handleUnlocked,
 } from "./githubHandlers";
 
@@ -30,8 +28,6 @@ export function initGithub() {
     "issues.locked": (req) => handleLocked(req),
     "issues.unlocked": (req) => handleUnlocked(req),
     "issues.deleted": (req) => handleDeleted(req),
-    "issues.labeled": (req) => handleLabeled(req),
-    "issues.unlabeled": (req) => handleUnlabeled(req),
     "issue_comment.created": (req) => handleCreated(req),
     "projects_v2_item.edited": (req) => handleProjectItemEdited(req),
   };
