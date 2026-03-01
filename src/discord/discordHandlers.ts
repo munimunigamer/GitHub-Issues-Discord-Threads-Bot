@@ -27,6 +27,7 @@ import { Thread } from "../interfaces";
 import {
   syncKanbanTags,
   resetOpinionatedTags,
+  resetOpinionatedLabels,
   enrichThreadAfterIssueCreation,
 } from "./discordActions";
 
@@ -72,6 +73,14 @@ export async function handleClientReady(client: Client) {
   } catch (err) {
     logger.error(
       `Tag reset failed during startup: ${err instanceof Error ? err.message : "Unknown error"}`,
+    );
+  }
+
+  try {
+    await resetOpinionatedLabels();
+  } catch (err) {
+    logger.error(
+      `Label reset failed during startup: ${err instanceof Error ? err.message : "Unknown error"}`,
     );
   }
 

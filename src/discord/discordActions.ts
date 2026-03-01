@@ -323,8 +323,47 @@ export async function resetOpinionatedTags() {
   const refreshed = await forum.fetch();
   store.availableTags = refreshed.availableTags;
 
+  // Populate tagMap: opinionated tag name -> Discord tag ID
+  store.tagMap.clear();
+  for (const tag of OPINIONATED_TAGS) {
+    const matchingTag = store.availableTags.find((t) => t.name === tag.name);
+    if (matchingTag) {
+      store.tagMap.set(tag.name, matchingTag.id);
+    }
+  }
+
   logger.info(
-    `Tag reset: ${store.availableTags.length} opinionated tags set (${store.availableTags.length}/${TAG_BUDGET.total} slots used)`,
+    `Tag reset: ${store.availableTags.length} opinionated tags set, ${store.tagMap.size} mapped (${store.availableTags.length}/${TAG_BUDGET.total} slots used)`,
+  );
+}
+
+export async function resetOpinionatedLabels() {
+  // Fetch all existing labels
+  const { data: existingLabels } = await octokit.rest.issues.listLabelsForRepo({
+    ...repoCredentials,
+    per_page: 100,
+  });
+
+  // Delete every existing label (sequential to avoid rate limits)
+  let deletedCount = 0;
+  for (const label of existingLabels) {
+    await octokit.rest.issues.deleteLabel({
+      ...repoCredentials,
+      name: label.name,
+    });
+    deletedCount++;
+  }
+
+  // Create a label for each opinionated tag
+  for (const tag of OPINIONATED_TAGS) {
+    await octokit.rest.issues.createLabel({
+      ...repoCredentials,
+      name: tag.name,
+    });
+  }
+
+  logger.info(
+    `Label reset: deleted ${deletedCount} old labels, created ${OPINIONATED_TAGS.length} opinionated labels`,
   );
 }
 
