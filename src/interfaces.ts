@@ -43,4 +43,16 @@ interface GitHubLabel {
 // eslint-disable-next-line no-unused-vars
 type GithubHandlerFunction = (req: Request) => void;
 
-export { Thread, ThreadComment, GitIssue, GitHubLabel, GithubHandlerFunction };
+interface ProjectColumn {
+  id: string;
+  name: string;
+}
+
+export {
+  Thread,
+  ThreadComment,
+  GitIssue,
+  GitHubLabel,
+  GithubHandlerFunction,
+  ProjectColumn,
+};

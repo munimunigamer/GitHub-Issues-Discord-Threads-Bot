@@ -1,10 +1,16 @@
 import { GuildForumTag } from "discord.js";
-import { Thread } from "./interfaces";
+import { ProjectColumn, Thread } from "./interfaces";
 
 class Store {
   threads: Thread[] = [];
   availableTags: GuildForumTag[] = [];
   tagMap: Map<string, string> = new Map();
+
+  // Kanban state (Phase 5)
+  projectId?: string;
+  statusFieldId?: string;
+  kanbanColumns: ProjectColumn[] = [];
+  kanbanTagMap: Map<string, string> = new Map();
 
   deleteThread(id: string | undefined) {
     const index = this.threads.findIndex((obj) => obj.id === id);
