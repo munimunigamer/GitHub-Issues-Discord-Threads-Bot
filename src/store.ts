@@ -4,6 +4,7 @@ import { ProjectColumn, Thread } from "./interfaces";
 class Store {
   threads: Thread[] = [];
   availableTags: GuildForumTag[] = [];
+  tagMap: Map<string, string> = new Map();
 
   // Kanban state (Phase 5)
   projectId?: string;
