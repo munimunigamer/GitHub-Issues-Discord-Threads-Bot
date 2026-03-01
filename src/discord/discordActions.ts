@@ -375,3 +375,35 @@ export async function syncLabelsToTags() {
     `Tag sync: ${store.tagMap.size} labels mapped to Discord tags (${store.availableTags.length}/${TAG_BUDGET.total} tag slots used)`,
   );
 }
+
+export async function enrichThreadAfterIssueCreation(thread: Thread) {
+  if (!thread.number) return;
+
+  try {
+    // LINK-02: Rename thread with [#N] suffix
+    const channel = (await client.channels.fetch(thread.id)) as ThreadChannel;
+    const suffix = ` [#${thread.number}]`;
+    const maxBase = 100 - suffix.length;
+    const newName = thread.title.slice(0, maxBase) + suffix;
+    await channel.setName(newName);
+    thread.title = newName;
+
+    // LINK-01: Send bot message with GitHub issue URL
+    const issueUrl = `https://github.com/${config.GITHUB_USERNAME}/${config.GITHUB_REPOSITORY}/issues/${thread.number}`;
+    await channel.send(`GitHub issue created: ${issueUrl}`);
+
+    // LINK-03: Append Discord URL to GitHub issue body
+    const discordUrl = `https://discord.com/channels/${channel.guildId}/${thread.id}/${thread.id}`;
+    const updatedBody = `${thread.body}\n\n---\n[View on Discord](${discordUrl})`;
+    await octokit.rest.issues.update({
+      ...repoCredentials,
+      issue_number: thread.number,
+      body: updatedBody,
+    });
+    thread.body = updatedBody;
+  } catch (err) {
+    logger.warn(
+      `Cross-link enrichment failed for thread ${thread.id}: ${err instanceof Error ? err.message : "Unknown error"}`,
+    );
+  }
+}

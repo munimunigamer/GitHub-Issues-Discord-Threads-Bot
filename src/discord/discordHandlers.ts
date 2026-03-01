@@ -25,7 +25,10 @@ import {
 import { logger } from "../logger";
 import { store } from "../store";
 import { Thread } from "../interfaces";
-import { syncLabelsToTags } from "./discordActions";
+import {
+  syncLabelsToTags,
+  enrichThreadAfterIssueCreation,
+} from "./discordActions";
 
 export async function handleClientReady(client: Client) {
   logger.info(`Logged in as ${client.user?.tag}!`);
@@ -196,7 +199,8 @@ export async function handleMessageCreate(params: Message) {
   if (!thread) return;
 
   if (!thread.body) {
-    createIssue(thread, params);
+    await createIssue(thread, params);
+    await enrichThreadAfterIssueCreation(thread);
   } else {
     createIssueComment(thread, params);
   }
