@@ -313,6 +313,72 @@ export async function getThreadChannel(node_id: string | undefined): Promise<{
   return { thread, channel };
 }
 
+export async function addTagToThread(node_id: string, tagId: string) {
+  const { thread, channel } = await getThreadChannel(node_id);
+  if (!thread || !channel) return;
+
+  // Check if tag is already applied
+  if (thread.appliedTags.includes(tagId)) return;
+
+  // Respect Discord's 5-tag per-thread limit
+  if (thread.appliedTags.length >= 5) {
+    logger.warn(
+      `Thread ${thread.title}: Cannot add tag, already at 5-tag limit`,
+    );
+    return;
+  }
+
+  const newTags = [...thread.appliedTags, tagId].slice(0, 5);
+
+  // Set lock flag before making the change
+  thread.lockTagging = true;
+
+  // Handle archived threads: unarchive, modify, re-archive
+  const wasArchived = channel.archived;
+  if (wasArchived) {
+    thread.lockArchiving = true;
+    await channel.setArchived(false);
+  }
+
+  await channel.setAppliedTags(newTags);
+  thread.appliedTags = newTags;
+
+  if (wasArchived) {
+    await channel.setArchived(true);
+  }
+
+  info(Actions.Tagged, thread);
+}
+
+export async function removeTagFromThread(node_id: string, tagId: string) {
+  const { thread, channel } = await getThreadChannel(node_id);
+  if (!thread || !channel) return;
+
+  // Check if tag is actually applied
+  if (!thread.appliedTags.includes(tagId)) return;
+
+  const newTags = thread.appliedTags.filter((t) => t !== tagId);
+
+  // Set lock flag before making the change
+  thread.lockTagging = true;
+
+  // Handle archived threads: unarchive, modify, re-archive
+  const wasArchived = channel.archived;
+  if (wasArchived) {
+    thread.lockArchiving = true;
+    await channel.setArchived(false);
+  }
+
+  await channel.setAppliedTags(newTags);
+  thread.appliedTags = newTags;
+
+  if (wasArchived) {
+    await channel.setArchived(true);
+  }
+
+  info(Actions.Untagged, thread);
+}
+
 export async function resetOpinionatedTags() {
   const forum = (await client.channels.fetch(
     config.DISCORD_CHANNEL_ID,
