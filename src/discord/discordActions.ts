@@ -1,4 +1,9 @@
-import { ForumChannel, MessagePayload, ThreadChannel } from "discord.js";
+import {
+  EmbedBuilder,
+  ForumChannel,
+  MessagePayload,
+  ThreadChannel,
+} from "discord.js";
 import { config } from "../config";
 import { Thread } from "../interfaces";
 import { octokit, repoCredentials } from "../github/githubActions";
@@ -20,6 +25,41 @@ const TAG_BUDGET = {
 
 const info = (action: ActionValue, thread: Thread) =>
   logger.info(`${Triggerer.Github} | ${action} | ${getDiscordUrl(thread)}`);
+
+/**
+ * IMG-02: Extract image URLs from GitHub markdown content.
+ * Handles both markdown image syntax ![alt](url) and HTML <img src="url"> tags.
+ * Returns deduplicated array of image URL strings.
+ */
+export function extractImageUrls(markdown: string): string[] {
+  if (!markdown) return [];
+
+  const urls: string[] = [];
+
+  // Markdown images: ![alt](url) or ![alt](url "title")
+  const mdRegex = /!\[([^\]]*)\]\(([^\s)]+)(?:\s+"[^"]*")?\)/g;
+  let match;
+  while ((match = mdRegex.exec(markdown)) !== null) {
+    urls.push(match[2]);
+  }
+
+  // HTML img tags: <img ... src="url" ...>
+  const htmlRegex = /<img\s[^>]*src=["']([^"']+)["'][^>]*>/gi;
+  while ((match = htmlRegex.exec(markdown)) !== null) {
+    urls.push(match[1]);
+  }
+
+  // Deduplicate
+  return [...new Set(urls)];
+}
+
+/**
+ * IMG-02: Create Discord embed objects for image URLs.
+ * Discord supports up to 10 embeds per message; slices to 10 if more.
+ */
+export function createImageEmbeds(imageUrls: string[]): EmbedBuilder[] {
+  return imageUrls.slice(0, 10).map((url) => new EmbedBuilder().setImage(url));
+}
 
 export async function createThread({
   body,
