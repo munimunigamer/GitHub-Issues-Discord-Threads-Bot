@@ -92,9 +92,13 @@ export async function createThread({
     // LINK-01: Include GitHub issue URL in first message
     const issueUrl = `https://github.com/${config.GITHUB_USERNAME}/${config.GITHUB_REPOSITORY}/issues/${number}`;
 
+    // IMG-02: Extract image URLs from body and create embeds
+    const imageEmbeds = body ? createImageEmbeds(extractImageUrls(body)) : [];
+
     const forumThread = await forum.threads.create({
       message: {
         content: `**${login}** opened this issue on GitHub: ${issueUrl}\n\n${body || "*No description provided.*"}`,
+        ...(imageEmbeds.length > 0 && { embeds: imageEmbeds }),
       },
       name: suffixedTitle,
       appliedTags,
@@ -159,12 +163,16 @@ export async function createComment({
   const { thread, channel } = await getThreadChannel(node_id);
   if (!thread || !channel) return;
 
+  // IMG-02: Extract image URLs from body and create embeds
+  const imageEmbeds = body ? createImageEmbeds(extractImageUrls(body)) : [];
+
   channel.parent
     ?.createWebhook({ name: login, avatar: avatar_url })
     .then((webhook) => {
       const messagePayload = MessagePayload.create(webhook, {
         content: body,
         threadId: thread.id,
+        ...(imageEmbeds.length > 0 && { embeds: imageEmbeds }),
       }).resolveBody();
       webhook
         .send(messagePayload)
