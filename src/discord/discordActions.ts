@@ -19,16 +19,22 @@ import client from "./discord";
 
 const TAG_BUDGET = {
   total: 20, // Discord hard limit
-  opinionated: 14, // Max opinionated tags
-  kanban: 6, // Max kanban column tags (20 - opinionated)
+  opinionated: 12, // Max opinionated tags
+  kanban: 8, // Max kanban column tags (20 - opinionated)
 };
 
-const OPINIONATED_TAGS: { name: string; moderated?: boolean }[] = [
-  // Issue type
-  { name: "Bug" },
-  { name: "Feature" },
-  { name: "Question" },
-  { name: "Discussion" },
+interface OpinionatedTag {
+  name: string;
+  moderated?: boolean;
+  emoji?: { id: null; name: string };
+  color?: string; // 6-char hex for GitHub label, no # prefix
+}
+
+const OPINIONATED_TAGS: OpinionatedTag[] = [
+  // Issue type (colored)
+  { name: "Bug", emoji: { id: null, name: "\u{1F534}" }, color: "d73a4a" },
+  { name: "Feature", emoji: { id: null, name: "\u{1F7E2}" }, color: "a2eeef" },
+  { name: "Task", emoji: { id: null, name: "\u{1F535}" }, color: "0075ca" },
   // Priority (moderator-only)
   { name: "Critical", moderated: true },
   { name: "High Priority", moderated: true },
@@ -425,6 +431,7 @@ export async function resetOpinionatedLabels() {
     await octokit.rest.issues.createLabel({
       ...repoCredentials,
       name: tag.name,
+      ...(tag.color && { color: tag.color }),
     });
   }
 
