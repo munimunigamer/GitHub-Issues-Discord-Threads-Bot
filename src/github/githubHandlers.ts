@@ -118,7 +118,10 @@ export async function handleTyped(req: Request) {
   const newTagId = store.tagMap.get(issueType.name);
   if (!newTagId) return;
 
-  // Remove any existing type tags first (handles type switching e.g. Bug→Feature)
+  // Add new type tag first, then remove old ones (add-first avoids the
+  // "cannot remove last tag" guard when the old type is the only tag)
+  await addTagToThread(node_id, newTagId);
+
   for (const [name, tagId] of store.tagMap.entries()) {
     if (
       TYPE_TAG_NAMES.has(name) &&
@@ -128,8 +131,6 @@ export async function handleTyped(req: Request) {
       await removeTagFromThread(node_id, tagId);
     }
   }
-
-  await addTagToThread(node_id, newTagId);
 }
 
 export async function handleUntyped(req: Request) {
