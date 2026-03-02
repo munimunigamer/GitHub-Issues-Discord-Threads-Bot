@@ -28,13 +28,29 @@ interface OpinionatedTag {
   moderated?: boolean;
   emoji?: { id: null; name: string };
   color?: string; // 6-char hex for GitHub label, no # prefix
+  isType?: boolean; // true = synced via GitHub native issue types, not labels
 }
 
 const OPINIONATED_TAGS: OpinionatedTag[] = [
-  // Issue type (colored)
-  { name: "Bug", emoji: { id: null, name: "\u{1F534}" }, color: "d73a4a" },
-  { name: "Feature", emoji: { id: null, name: "\u{1F7E2}" }, color: "a2eeef" },
-  { name: "Task", emoji: { id: null, name: "\u{1F535}" }, color: "0075ca" },
+  // Issue type (colored) — synced via GitHub native issue types, not labels
+  {
+    name: "Bug",
+    emoji: { id: null, name: "\u{1F534}" },
+    color: "d73a4a",
+    isType: true,
+  },
+  {
+    name: "Feature",
+    emoji: { id: null, name: "\u{1F7E2}" },
+    color: "a2eeef",
+    isType: true,
+  },
+  {
+    name: "Task",
+    emoji: { id: null, name: "\u{1F535}" },
+    color: "0075ca",
+    isType: true,
+  },
   // Priority (moderator-only)
   { name: "Critical", moderated: true },
   { name: "High Priority", moderated: true },
@@ -48,6 +64,11 @@ const OPINIONATED_TAGS: OpinionatedTag[] = [
   { name: "Help Wanted" },
   { name: "Duplicate", moderated: true },
 ];
+
+/** Set of tag names that map to GitHub native issue types (not labels) */
+export const TYPE_TAG_NAMES = new Set(
+  OPINIONATED_TAGS.filter((t) => t.isType).map((t) => t.name),
+);
 
 const COLUMN_COLOR_TO_EMOJI: Record<string, string> = {
   GRAY: "\u{26AB}", // Black circle (closest to gray)
@@ -376,6 +397,14 @@ export async function removeTagFromThread(node_id: string, tagId: string) {
 
   const newTags = thread.appliedTags.filter((t) => t !== tagId);
 
+  // Don't remove the last tag if the forum requires one
+  if (newTags.length === 0) {
+    logger.warn(
+      `Thread ${thread.title}: Cannot remove last tag, forum requires at least one`,
+    );
+    return;
+  }
+
   // Set lock flag before making the change
   thread.lockTagging = true;
 
@@ -437,8 +466,10 @@ export async function resetOpinionatedLabels() {
     deletedCount++;
   }
 
-  // Create a label for each opinionated tag
-  for (const tag of OPINIONATED_TAGS) {
+  // Create a label for each non-type opinionated tag
+  // Type tags (Bug/Feature/Task) are managed via GitHub native issue types
+  const labelTags = OPINIONATED_TAGS.filter((t) => !t.isType);
+  for (const tag of labelTags) {
     await octokit.rest.issues.createLabel({
       ...repoCredentials,
       name: tag.name,
@@ -447,7 +478,7 @@ export async function resetOpinionatedLabels() {
   }
 
   logger.info(
-    `Label reset: deleted ${deletedCount} old labels, created ${OPINIONATED_TAGS.length} opinionated labels`,
+    `Label reset: deleted ${deletedCount} old labels, created ${labelTags.length} opinionated labels (${TYPE_TAG_NAMES.size} type tags managed natively)`,
   );
 }
 

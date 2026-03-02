@@ -21,7 +21,8 @@ async function getIssueNodeId(req: Request): Promise<string | undefined> {
 
 export async function handleOpened(req: Request) {
   if (!req.body.issue) return;
-  const { node_id, number, title, user, body, labels } = req.body.issue;
+  const { node_id, number, title, user, body, labels, issue_type } =
+    req.body.issue;
   if (store.threads.some((thread) => thread.node_id === node_id)) return;
 
   const { login } = user;
@@ -31,6 +32,18 @@ export async function handleOpened(req: Request) {
     .map((label: { name: string }) => store.tagMap.get(label.name))
     .filter((tagId: string | undefined): tagId is string => tagId !== undefined)
     .slice(0, 5); // Discord 5-tag limit
+
+  // Map native issue type to Discord tag ID
+  if (issue_type?.name) {
+    const typeTagId = store.tagMap.get(issue_type.name);
+    if (
+      typeTagId &&
+      !appliedTags.includes(typeTagId) &&
+      appliedTags.length < 5
+    ) {
+      appliedTags.push(typeTagId);
+    }
+  }
 
   createThread({ login, appliedTags, number, title, body, node_id });
 }
@@ -78,6 +91,49 @@ export async function handleUnlocked(req: Request) {
 export async function handleDeleted(req: Request) {
   const node_id = await getIssueNodeId(req);
   deleteThread(node_id);
+}
+
+export async function handleTyped(req: Request) {
+  const { node_id } = req.body.issue;
+  const issueType = req.body.issue?.issue_type;
+  if (!issueType || !node_id) return;
+
+  const thread = store.threads.find((t) => t.node_id === node_id);
+  if (!thread) return;
+
+  // Echo suppression: skip if this type change was initiated by the bot
+  if (thread.lockLabeling) {
+    thread.lockLabeling = false;
+    return;
+  }
+
+  const tagId = store.tagMap.get(issueType.name);
+  if (!tagId) return;
+
+  await addTagToThread(node_id, tagId);
+}
+
+export async function handleUntyped(req: Request) {
+  const { node_id } = req.body.issue;
+  if (!node_id) return;
+
+  const thread = store.threads.find((t) => t.node_id === node_id);
+  if (!thread) return;
+
+  // Echo suppression: skip if this type change was initiated by the bot
+  if (thread.lockLabeling) {
+    thread.lockLabeling = false;
+    return;
+  }
+
+  // Determine the old type name from webhook changes payload
+  const oldTypeName = req.body.changes?.issue_type?.from?.name;
+  if (!oldTypeName) return;
+
+  const tagId = store.tagMap.get(oldTypeName);
+  if (!tagId) return;
+
+  await removeTagFromThread(node_id, tagId);
 }
 
 export async function handleLabeled(req: Request) {

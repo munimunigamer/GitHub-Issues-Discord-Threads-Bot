@@ -190,8 +190,8 @@ export async function createIssue(thread: Thread, params: Message) {
   try {
     const body = getIssueBody(params);
 
-    // Map opinionated Discord tags to GitHub label names
-    const labels = appliedTags
+    // Map opinionated Discord tags to GitHub label/type names
+    const allTagNames = appliedTags
       .map((tagId) => {
         for (const [name, id] of store.tagMap.entries()) {
           if (id === tagId) return name;
@@ -199,6 +199,10 @@ export async function createIssue(thread: Thread, params: Message) {
         return undefined;
       })
       .filter((name): name is string => name !== undefined);
+
+    // Split into type tags (handled via native issue types) and label tags
+    const typeNames = allTagNames.filter((n) => store.issueTypeMap.has(n));
+    const labels = allTagNames.filter((n) => !store.issueTypeMap.has(n));
 
     const response = await octokit.rest.issues.create({
       ...repoCredentials,
@@ -212,6 +216,11 @@ export async function createIssue(thread: Thread, params: Message) {
       thread.body = response.data.body!;
       thread.number = response.data.number;
       info(Actions.Created, thread);
+
+      // Set native issue type after creation
+      for (const typeName of typeNames) {
+        await setIssueType(thread, typeName);
+      }
     } else {
       error("Failed to create issue - No response data", thread);
     }
@@ -390,6 +399,113 @@ async function fillCommentsData() {
       error(`Failed to load comments: ${err.message}`);
     } else {
       error("Failed to load comments due to an unknown error");
+    }
+  }
+}
+
+export async function discoverIssueTypes(): Promise<void> {
+  try {
+    const result: any = await octokit.graphql(
+      `query($owner: String!) {
+        organization(login: $owner) {
+          issueTypes(first: 100) {
+            nodes {
+              id
+              name
+            }
+          }
+        }
+      }`,
+      {
+        owner: config.GITHUB_OWNER,
+        headers: { "GraphQL-Features": "issue_types" },
+      },
+    );
+
+    const types = result.organization?.issueTypes?.nodes;
+    if (!types || types.length === 0) {
+      logger.warn("Issue types: No issue types found for organization.");
+      return;
+    }
+
+    store.issueTypeMap.clear();
+    for (const t of types) {
+      store.issueTypeMap.set(t.name, t.id);
+    }
+
+    logger.info(
+      `Issue types: Discovered ${store.issueTypeMap.size} types (${[...store.issueTypeMap.keys()].join(", ")})`,
+    );
+  } catch (err) {
+    logger.error(
+      `Issue types: Failed to discover issue types: ${err instanceof Error ? err.message : "Unknown error"}`,
+    );
+  }
+}
+
+export async function setIssueType(thread: Thread, typeName: string) {
+  const { node_id } = thread;
+  if (!node_id) {
+    error("Thread does not have a node ID", thread);
+    return;
+  }
+
+  const issueTypeId = store.issueTypeMap.get(typeName);
+  if (!issueTypeId) {
+    error(`No issue type ID found for "${typeName}"`, thread);
+    return;
+  }
+
+  try {
+    await octokit.graphql(
+      `mutation($issueId: ID!, $issueTypeId: ID!) {
+        updateIssueIssueType(input: { issueId: $issueId, issueTypeId: $issueTypeId }) {
+          issue { issueType { name } }
+        }
+      }`,
+      {
+        issueId: node_id,
+        issueTypeId,
+        headers: { "GraphQL-Features": "issue_types" },
+      },
+    );
+
+    info(Actions.Tagged, thread);
+  } catch (err) {
+    if (err instanceof Error) {
+      error(`Failed to set issue type: ${err.message}`, thread);
+    } else {
+      error("Failed to set issue type due to an unknown error", thread);
+    }
+  }
+}
+
+export async function clearIssueType(thread: Thread) {
+  const { node_id } = thread;
+  if (!node_id) {
+    error("Thread does not have a node ID", thread);
+    return;
+  }
+
+  try {
+    await octokit.graphql(
+      `mutation($issueId: ID!) {
+        updateIssueIssueType(input: { issueId: $issueId, issueTypeId: null }) {
+          issue { issueType { name } }
+        }
+      }`,
+      {
+        issueId: node_id,
+        headers: { "GraphQL-Features": "issue_types" },
+      },
+    );
+
+    info(Actions.Untagged, thread);
+  } catch (err) {
+    if (err instanceof Error) {
+      error(`Failed to clear issue type: ${err.message}`, thread);
+    } else {
+      error("Failed to clear issue type due to an unknown error", thread);
     }
   }
 }

@@ -11,16 +11,19 @@ import {
 import { config } from "../config";
 import {
   addLabelsToIssue,
+  clearIssueType,
   closeIssue,
   createIssue,
   createIssueComment,
   deleteComment,
   deleteIssue,
+  discoverIssueTypes,
   discoverProject,
   getIssues,
   lockIssue,
   openIssue,
   removeLabelFromIssue,
+  setIssueType,
   unlockIssue,
 } from "../github/githubActions";
 import { logger } from "../logger";
@@ -31,6 +34,7 @@ import {
   resetOpinionatedTags,
   resetOpinionatedLabels,
   enrichThreadAfterIssueCreation,
+  TYPE_TAG_NAMES,
 } from "./discordActions";
 
 export async function handleClientReady(client: Client) {
@@ -83,6 +87,14 @@ export async function handleClientReady(client: Client) {
   } catch (err) {
     logger.error(
       `Label reset failed during startup: ${err instanceof Error ? err.message : "Unknown error"}`,
+    );
+  }
+
+  try {
+    await discoverIssueTypes();
+  } catch (err) {
+    logger.error(
+      `Issue type discovery failed during startup: ${err instanceof Error ? err.message : "Unknown error"}`,
     );
   }
 
@@ -174,15 +186,32 @@ export async function handleThreadUpdate(
       })
       .filter((name): name is string => name !== undefined);
 
-    if (addedLabels.length > 0) {
+    // Split into type tags (synced via issue types) and non-type tags (synced via labels)
+    const addedTypes = addedLabels.filter((n) => TYPE_TAG_NAMES.has(n));
+    const addedNonTypes = addedLabels.filter((n) => !TYPE_TAG_NAMES.has(n));
+    const removedTypes = removedLabels.filter((n) => TYPE_TAG_NAMES.has(n));
+    const removedNonTypes = removedLabels.filter((n) => !TYPE_TAG_NAMES.has(n));
+
+    // Sync non-type tags as labels (existing behavior)
+    if (addedNonTypes.length > 0) {
       thread.lockLabeling = true;
-      await addLabelsToIssue(thread, addedLabels);
+      await addLabelsToIssue(thread, addedNonTypes);
     }
-    if (removedLabels.length > 0) {
+    if (removedNonTypes.length > 0) {
       thread.lockLabeling = true;
-      for (const label of removedLabels) {
+      for (const label of removedNonTypes) {
         await removeLabelFromIssue(thread, label);
       }
+    }
+
+    // Sync type tags as GitHub native issue types
+    for (const typeName of addedTypes) {
+      thread.lockLabeling = true;
+      await setIssueType(thread, typeName);
+    }
+    for (const _typeName of removedTypes) {
+      thread.lockLabeling = true;
+      await clearIssueType(thread);
     }
   }
 

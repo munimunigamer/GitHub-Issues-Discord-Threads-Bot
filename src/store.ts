@@ -6,6 +6,9 @@ class Store {
   availableTags: GuildForumTag[] = [];
   tagMap: Map<string, string> = new Map();
 
+  // Issue type state: maps type name (e.g. "Bug") -> GitHub node_id
+  issueTypeMap: Map<string, string> = new Map();
+
   // Kanban state (Phase 5)
   projectId?: string;
   statusFieldId?: string;

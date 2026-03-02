@@ -11,8 +11,10 @@ import {
   handleOpened,
   handleProjectItemEdited,
   handleReopened,
+  handleTyped,
   handleUnlabeled,
   handleUnlocked,
+  handleUntyped,
 } from "./githubHandlers";
 
 const app = express();
@@ -49,6 +51,8 @@ export function initGithub() {
     "issues.deleted": (req) => handleDeleted(req),
     "issues.labeled": (req) => handleLabeled(req),
     "issues.unlabeled": (req) => handleUnlabeled(req),
+    "issues.typed": (req) => handleTyped(req),
+    "issues.untyped": (req) => handleUntyped(req),
     "issue_comment.created": (req) => handleCreated(req),
     "projects_v2_item.edited": (req) => handleProjectItemEdited(req),
   };
