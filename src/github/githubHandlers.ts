@@ -22,8 +22,15 @@ async function getIssueNodeId(req: Request): Promise<string | undefined> {
 
 export async function handleOpened(req: Request) {
   if (!req.body.issue) return;
-  const { node_id, number, title, user, body, labels, issue_type } =
-    req.body.issue;
+  const {
+    node_id,
+    number,
+    title,
+    user,
+    body,
+    labels,
+    type: issue_type,
+  } = req.body.issue;
   if (store.threads.some((thread) => thread.node_id === node_id)) return;
 
   const { login } = user;
@@ -96,7 +103,7 @@ export async function handleDeleted(req: Request) {
 
 export async function handleTyped(req: Request) {
   const { node_id } = req.body.issue;
-  const issueType = req.body.issue?.issue_type;
+  const issueType = req.body.issue?.type;
   if (!issueType || !node_id) return;
 
   const thread = store.threads.find((t) => t.node_id === node_id);
@@ -139,7 +146,7 @@ export async function handleUntyped(req: Request) {
   }
 
   // Determine the old type name from webhook changes payload
-  const oldTypeName = req.body.changes?.issue_type?.from?.name;
+  const oldTypeName = req.body.changes?.type?.from?.name;
   if (!oldTypeName) return;
 
   const tagId = store.tagMap.get(oldTypeName);
