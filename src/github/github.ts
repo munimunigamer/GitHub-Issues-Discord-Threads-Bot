@@ -2,6 +2,7 @@ import crypto from "crypto";
 import express from "express";
 import { config } from "../config";
 import { GithubHandlerFunction } from "../interfaces";
+import { logger } from "../logger";
 import {
   handleClosed,
   handleCreated,
@@ -70,7 +71,13 @@ export function initGithub() {
     const action = req.body.action as string;
     const key = `${event}.${action}`;
     const handler = githubHandlers[key];
-    handler && handler(req);
+    if (handler) {
+      handler(req).catch((err) =>
+        logger.error(
+          `Webhook ${key} handler error: ${err instanceof Error ? err.message : "Unknown error"}`,
+        ),
+      );
+    }
     res.json({ msg: "ok" });
   });
 

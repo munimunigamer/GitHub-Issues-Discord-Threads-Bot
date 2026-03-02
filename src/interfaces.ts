@@ -31,7 +31,7 @@ interface GitIssue {
 }
 
 // eslint-disable-next-line no-unused-vars
-type GithubHandlerFunction = (req: Request) => void;
+type GithubHandlerFunction = (req: Request) => Promise<void>;
 
 interface ProjectColumn {
   id: string;

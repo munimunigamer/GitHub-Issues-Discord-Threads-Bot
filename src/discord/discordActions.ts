@@ -355,6 +355,9 @@ export async function addTagToThread(node_id: string, tagId: string) {
   const { thread, channel } = await getThreadChannel(node_id);
   if (!thread || !channel) return;
 
+  // Sync store with actual Discord state to prevent stale overwrites
+  thread.appliedTags = [...channel.appliedTags];
+
   // Check if tag is already applied
   if (thread.appliedTags.includes(tagId)) return;
 
@@ -391,6 +394,9 @@ export async function addTagToThread(node_id: string, tagId: string) {
 export async function removeTagFromThread(node_id: string, tagId: string) {
   const { thread, channel } = await getThreadChannel(node_id);
   if (!thread || !channel) return;
+
+  // Sync store with actual Discord state to prevent stale overwrites
+  thread.appliedTags = [...channel.appliedTags];
 
   // Check if tag is actually applied
   if (!thread.appliedTags.includes(tagId)) return;

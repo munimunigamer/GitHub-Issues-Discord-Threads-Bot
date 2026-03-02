@@ -161,6 +161,9 @@ export async function handleLabeled(req: Request) {
   const label = req.body.label;
   if (!label || !node_id) return;
 
+  // Skip type labels — managed via handleTyped/handleUntyped
+  if (TYPE_TAG_NAMES.has(label.name)) return;
+
   const thread = store.threads.find((t) => t.node_id === node_id);
   if (!thread) return;
 
@@ -181,6 +184,9 @@ export async function handleUnlabeled(req: Request) {
   const { node_id } = req.body.issue;
   const label = req.body.label;
   if (!label || !node_id) return;
+
+  // Skip type labels — managed via handleTyped/handleUntyped
+  if (TYPE_TAG_NAMES.has(label.name)) return;
 
   const thread = store.threads.find((t) => t.node_id === node_id);
   if (!thread) return;
