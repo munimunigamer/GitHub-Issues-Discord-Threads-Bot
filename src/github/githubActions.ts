@@ -417,6 +417,7 @@ export async function discoverProject(): Promise<{
                     options {
                       id
                       name
+                      color
                     }
                   }
                 }
@@ -452,9 +453,10 @@ export async function discoverProject(): Promise<{
     }
 
     const columns: ProjectColumn[] = statusField.options.map(
-      (opt: { id: string; name: string }) => ({
+      (opt: { id: string; name: string; color?: string }) => ({
         id: opt.id,
         name: opt.name,
+        ...(opt.color && { color: opt.color }),
       }),
     );
 

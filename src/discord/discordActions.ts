@@ -49,6 +49,17 @@ const OPINIONATED_TAGS: OpinionatedTag[] = [
   { name: "Duplicate", moderated: true },
 ];
 
+const COLUMN_COLOR_TO_EMOJI: Record<string, string> = {
+  GRAY: "\u{26AB}", // Black circle (closest to gray)
+  RED: "\u{1F534}", // Red circle
+  ORANGE: "\u{1F7E0}", // Orange circle
+  YELLOW: "\u{1F7E1}", // Yellow circle
+  GREEN: "\u{1F7E2}", // Green circle
+  BLUE: "\u{1F535}", // Blue circle
+  PURPLE: "\u{1F7E3}", // Purple circle
+  PINK: "\u{1F534}", // Red circle (no pink circle exists)
+};
+
 const info = (action: ActionValue, thread: Thread) =>
   logger.info(`${Triggerer.Github} | ${action} | ${getDiscordUrl(thread)}`);
 
@@ -467,20 +478,42 @@ export async function syncKanbanTags(columns: ProjectColumn[]) {
           `Kanban: Column name "${col.name}" truncated to "${truncated}" for Discord tag`,
         );
       }
-      return { name: truncated };
+      const emojiName = col.color
+        ? COLUMN_COLOR_TO_EMOJI[col.color]
+        : undefined;
+      return {
+        name: truncated,
+        ...(emojiName && { emoji: { id: null, name: emojiName } }),
+      };
     });
 
+  // Build updated tag list: update existing kanban tags with emoji, add new ones
+  const updatedExistingTags = existingTags.map((tag) => {
+    const matchingCol = columnsToSync.find(
+      (col) => col.name.slice(0, 20) === tag.name,
+    );
+    if (matchingCol?.color && COLUMN_COLOR_TO_EMOJI[matchingCol.color]) {
+      return {
+        ...tag,
+        emoji: { id: null, name: COLUMN_COLOR_TO_EMOJI[matchingCol.color] },
+      };
+    }
+    return tag;
+  });
+
+  const allTags = [...updatedExistingTags, ...newColumnTags];
+
   // Check total budget
-  if (existingTags.length + newColumnTags.length > TAG_BUDGET.total) {
+  if (allTags.length > TAG_BUDGET.total) {
     logger.warn(
       `Kanban: Cannot create ${newColumnTags.length} kanban tags -- would exceed ${TAG_BUDGET.total}-tag Discord limit (${existingTags.length} already used)`,
     );
     return;
   }
 
-  // Create new tags if any
-  if (newColumnTags.length > 0) {
-    await forum.setAvailableTags([...existingTags, ...newColumnTags]);
+  // Always call setAvailableTags to ensure emoji is set on all tags
+  if (newColumnTags.length > 0 || columnsToSync.some((col) => col.color)) {
+    await forum.setAvailableTags(allTags);
   }
 
   // Refresh the forum and update store

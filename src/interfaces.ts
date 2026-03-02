@@ -36,6 +36,7 @@ type GithubHandlerFunction = (req: Request) => void;
 interface ProjectColumn {
   id: string;
   name: string;
+  color?: string; // GitHub Project column color enum (e.g., "GREEN", "BLUE")
 }
 
 export {
