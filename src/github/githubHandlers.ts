@@ -7,6 +7,7 @@ import {
   deleteThread,
   lockThread,
   removeTagFromThread,
+  TYPE_TAG_NAMES,
   unarchiveThread,
   unlockThread,
   updateKanbanTag,
@@ -107,10 +108,21 @@ export async function handleTyped(req: Request) {
     return;
   }
 
-  const tagId = store.tagMap.get(issueType.name);
-  if (!tagId) return;
+  const newTagId = store.tagMap.get(issueType.name);
+  if (!newTagId) return;
 
-  await addTagToThread(node_id, tagId);
+  // Remove any existing type tags first (handles type switching e.g. Bug→Feature)
+  for (const [name, tagId] of store.tagMap.entries()) {
+    if (
+      TYPE_TAG_NAMES.has(name) &&
+      tagId !== newTagId &&
+      thread.appliedTags.includes(tagId)
+    ) {
+      await removeTagFromThread(node_id, tagId);
+    }
+  }
+
+  await addTagToThread(node_id, newTagId);
 }
 
 export async function handleUntyped(req: Request) {

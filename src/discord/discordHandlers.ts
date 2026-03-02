@@ -205,13 +205,25 @@ export async function handleThreadUpdate(
     }
 
     // Sync type tags as GitHub native issue types
+    // When switching types (e.g. Bug→Feature), the user must add the new tag
+    // first then remove the old one (forum requires ≥1 tag). So we may see
+    // removes without adds — only clear the GitHub type if NO type tag remains.
     for (const typeName of addedTypes) {
       thread.lockLabeling = true;
       await setIssueType(thread, typeName);
     }
-    for (const _typeName of removedTypes) {
-      thread.lockLabeling = true;
-      await clearIssueType(thread);
+    if (removedTypes.length > 0 && addedTypes.length === 0) {
+      // Check if any type tag is still applied on the thread
+      const hasRemainingType = currentTags.some((tagId) => {
+        for (const [name, id] of store.tagMap.entries()) {
+          if (id === tagId && TYPE_TAG_NAMES.has(name)) return true;
+        }
+        return false;
+      });
+      if (!hasRemainingType) {
+        thread.lockLabeling = true;
+        await clearIssueType(thread);
+      }
     }
   }
 
