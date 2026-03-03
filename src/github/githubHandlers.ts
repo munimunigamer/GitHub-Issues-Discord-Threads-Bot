@@ -285,6 +285,44 @@ export async function handlePullRequestOpened(req: Request) {
   }
 }
 
+export async function handlePullRequestEdited(req: Request) {
+  const pr = req.body.pull_request;
+  if (!pr) return;
+  // Only act when the body changed (new references may have been added)
+  if (!req.body.changes?.body) return;
+
+  const { login, avatar_url } = req.body.sender;
+  const prLink = `[#${pr.number} ${pr.title}](${pr.html_url})`;
+  const { closing, referencing } = parseIssueReferences(pr.body);
+
+  // Also parse the old body so we only notify for NEW references
+  const oldRefs = parseIssueReferences(req.body.changes.body.from);
+  const oldAll = new Set([...oldRefs.closing, ...oldRefs.referencing]);
+
+  for (const num of referencing) {
+    if (oldAll.has(num)) continue;
+    await sendActivityMessageByNumber({
+      number: num,
+      login,
+      avatar_url,
+      title: "Pull Request Linked",
+      description: `${prLink}\nThis pull request references this issue.`,
+      color: ActivityColor.PR_OPEN,
+    });
+  }
+  for (const num of closing) {
+    if (oldAll.has(num)) continue;
+    await sendActivityMessageByNumber({
+      number: num,
+      login,
+      avatar_url,
+      title: "Pull Request Linked",
+      description: `${prLink}\nThis pull request will close this issue when merged.`,
+      color: ActivityColor.PR_OPEN,
+    });
+  }
+}
+
 export async function handlePullRequestMerged(req: Request) {
   const pr = req.body.pull_request;
   if (!pr || !pr.merged) return;

@@ -15,6 +15,7 @@ import {
   handleMilestoned,
   handleOpened,
   handleProjectItemEdited,
+  handlePullRequestEdited,
   handlePullRequestMerged,
   handlePullRequestOpened,
   handleReopened,
@@ -97,6 +98,7 @@ export function initGithub() {
     "issues.edited": (req) => handleEdited(req),
     "issue_comment.created": (req) => handleCreated(req),
     "pull_request.opened": (req) => handlePullRequestOpened(req),
+    "pull_request.edited": (req) => handlePullRequestEdited(req),
     "pull_request.closed": (req) => handlePullRequestMerged(req),
     "projects_v2_item.edited": (req) => handleProjectItemEdited(req),
   };
@@ -128,6 +130,8 @@ export function initGithub() {
           `Webhook ${key} handler error: ${err instanceof Error ? err.message : "Unknown error"}`,
         ),
       );
+    } else {
+      logger.info(`Unhandled webhook event: ${key}`);
     }
     res.json({ msg: "ok" });
   });
