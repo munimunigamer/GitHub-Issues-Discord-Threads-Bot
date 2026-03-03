@@ -351,7 +351,10 @@ export async function sendActivityMessageByNumber({
   color: number;
 }) {
   const thread = store.threads.find((t) => t.number === number);
-  if (!thread?.node_id) return;
+  if (!thread?.node_id) {
+    logger.warn(`Activity: No thread found for issue #${number}`);
+    return;
+  }
 
   await sendActivityMessage({
     node_id: thread.node_id,

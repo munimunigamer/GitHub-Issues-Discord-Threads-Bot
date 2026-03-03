@@ -263,6 +263,10 @@ export async function handlePullRequestOpened(req: Request) {
   const prLink = `[#${pr.number} ${pr.title}](${pr.html_url})`;
   const { closing, referencing } = parseIssueReferences(pr.body);
 
+  logger.info(
+    `PR #${pr.number} opened: found ${referencing.length} references, ${closing.length} closing`,
+  );
+
   for (const num of referencing) {
     await sendActivityMessageByNumber({
       number: num,
