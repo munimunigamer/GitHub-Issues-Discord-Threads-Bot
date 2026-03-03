@@ -53,6 +53,14 @@ export async function handleOpened(req: Request) {
     }
   }
 
+  // Ensure at least one tag -- Discord forums may require a tag to create a post
+  if (appliedTags.length === 0) {
+    const fallbackTagId = store.tagMap.get("Needs Triage");
+    if (fallbackTagId) {
+      appliedTags.push(fallbackTagId);
+    }
+  }
+
   createThread({ login, appliedTags, number, title, body, node_id });
 }
 

@@ -22,6 +22,33 @@ const app = express();
 // Use raw body so we can verify the webhook signature before parsing
 app.use(express.json());
 
+// Deduplication cache for GitHub webhook deliveries.
+// Prevents processing the same event twice when GitHub retries or sends duplicates.
+const DELIVERY_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const recentDeliveries = new Map<string, number>();
+
+function isDuplicateDelivery(deliveryId: string | undefined): boolean {
+  if (!deliveryId) return false; // If no delivery ID, allow through (don't block)
+
+  const now = Date.now();
+
+  // Prune expired entries periodically (when cache exceeds 100 entries)
+  if (recentDeliveries.size > 100) {
+    for (const [id, timestamp] of recentDeliveries) {
+      if (now - timestamp > DELIVERY_CACHE_TTL_MS) {
+        recentDeliveries.delete(id);
+      }
+    }
+  }
+
+  if (recentDeliveries.has(deliveryId)) {
+    return true; // Already processed
+  }
+
+  recentDeliveries.set(deliveryId, now);
+  return false;
+}
+
 function verifySignature(
   payload: string,
   signature: string | undefined,
@@ -64,6 +91,14 @@ export function initGithub() {
 
     if (!verifySignature(payload, signature)) {
       res.status(401).json({ msg: "invalid signature" });
+      return;
+    }
+
+    // Deduplicate webhook deliveries using GitHub's unique delivery ID
+    const deliveryId = req.headers["x-github-delivery"] as string | undefined;
+    if (isDuplicateDelivery(deliveryId)) {
+      logger.warn(`Duplicate webhook delivery skipped: ${deliveryId}`);
+      res.json({ msg: "duplicate" });
       return;
     }
 

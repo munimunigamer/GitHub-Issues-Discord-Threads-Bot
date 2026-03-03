@@ -241,6 +241,9 @@ export async function handleThreadUpdate(
     locked ? lockIssue(thread) : unlockIssue(thread);
   }
   if (thread.archived !== archived) {
+    // Update thread.archived immediately to prevent duplicate events when
+    // two rapid ThreadUpdate events arrive before the setTimeout fires.
+    thread.archived = archived;
     setTimeout(() => {
       // timeout for fixing discord archived post locking
       if (thread.lockArchiving) {
@@ -250,7 +253,6 @@ export async function handleThreadUpdate(
         thread.lockLocking = false;
         return;
       }
-      thread.archived = archived;
       archived ? closeIssue(thread) : openIssue(thread);
     }, 500);
   }

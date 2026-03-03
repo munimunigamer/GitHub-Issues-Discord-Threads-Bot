@@ -168,9 +168,25 @@ export async function createThread({
     const imageEmbeds = createImageEmbeds(imageUrls);
     const displayBody = imageUrls.length > 0 ? stripImageSyntax(body) : body;
 
+    // Build the message content and truncate to Discord's 4000 char limit
+    const DISCORD_MAX_CONTENT = 4000;
+    const prefix = `**${login}** opened this issue on GitHub: ${issueUrl}\n\n`;
+    const truncationNote = `\n\n... [truncated - see full issue on GitHub](${issueUrl})`;
+    const bodyText = displayBody || "*No description provided.*";
+
+    let messageContent: string;
+    if ((prefix + bodyText).length > DISCORD_MAX_CONTENT) {
+      const maxBodyLength =
+        DISCORD_MAX_CONTENT - prefix.length - truncationNote.length;
+      messageContent =
+        prefix + bodyText.slice(0, maxBodyLength) + truncationNote;
+    } else {
+      messageContent = prefix + bodyText;
+    }
+
     const forumThread = await forum.threads.create({
       message: {
-        content: `**${login}** opened this issue on GitHub: ${issueUrl}\n\n${displayBody || "*No description provided.*"}`,
+        content: messageContent,
         ...(imageEmbeds.length > 0 && { embeds: imageEmbeds }),
       },
       name: suffixedTitle,
@@ -239,7 +255,18 @@ export async function createComment({
   // IMG-02: Extract image URLs from body, create embeds, and strip image tags from text
   const imageUrls = body ? extractImageUrls(body) : [];
   const imageEmbeds = createImageEmbeds(imageUrls);
-  const displayBody = imageUrls.length > 0 ? stripImageSyntax(body) : body;
+  let displayBody = imageUrls.length > 0 ? stripImageSyntax(body) : body;
+
+  // Truncate comment body to Discord's 2000 char webhook message limit
+  const DISCORD_WEBHOOK_MAX_CONTENT = 2000;
+  if (displayBody && displayBody.length > DISCORD_WEBHOOK_MAX_CONTENT) {
+    const commentTruncNote = "\n\n... [truncated]";
+    displayBody =
+      displayBody.slice(
+        0,
+        DISCORD_WEBHOOK_MAX_CONTENT - commentTruncNote.length,
+      ) + commentTruncNote;
+  }
 
   channel.parent
     ?.createWebhook({ name: login, avatar: avatar_url })
@@ -266,37 +293,53 @@ export async function archiveThread(node_id: string | undefined) {
   const { thread, channel } = await getThreadChannel(node_id);
   if (!thread || !channel || channel.archived) return;
 
-  info(Actions.Closed, thread);
-
-  thread.archived = true;
-  channel.setArchived(true);
+  try {
+    await channel.setArchived(true);
+    thread.archived = true;
+    info(Actions.Closed, thread);
+  } catch (err) {
+    logger.warn(
+      `Failed to archive thread ${thread.id}: ${err instanceof Error ? err.message : "Unknown error"}`,
+    );
+  }
 }
 
 export async function unarchiveThread(node_id: string | undefined) {
   const { thread, channel } = await getThreadChannel(node_id);
   if (!thread || !channel || !channel.archived) return;
 
-  info(Actions.Reopened, thread);
-
-  thread.archived = false;
-  channel.setArchived(false);
+  try {
+    await channel.setArchived(false);
+    thread.archived = false;
+    info(Actions.Reopened, thread);
+  } catch (err) {
+    logger.warn(
+      `Failed to unarchive thread ${thread.id}: ${err instanceof Error ? err.message : "Unknown error"}`,
+    );
+  }
 }
 
 export async function lockThread(node_id: string | undefined) {
   const { thread, channel } = await getThreadChannel(node_id);
   if (!thread || !channel || channel.locked) return;
 
-  info(Actions.Locked, thread);
-
-  thread.locked = true;
-  if (channel.archived) {
-    thread.lockArchiving = true;
-    thread.lockLocking = true;
-    channel.setArchived(false);
-    channel.setLocked(true);
-    channel.setArchived(true);
-  } else {
-    channel.setLocked(true);
+  try {
+    thread.locked = true;
+    if (channel.archived) {
+      thread.lockArchiving = true;
+      thread.lockLocking = true;
+      await channel.setArchived(false);
+      await channel.setLocked(true);
+      await channel.setArchived(true);
+    } else {
+      await channel.setLocked(true);
+    }
+    info(Actions.Locked, thread);
+  } catch (err) {
+    thread.locked = false; // Revert on failure
+    logger.warn(
+      `Failed to lock thread ${thread.id}: ${err instanceof Error ? err.message : "Unknown error"}`,
+    );
   }
 }
 
@@ -304,17 +347,23 @@ export async function unlockThread(node_id: string | undefined) {
   const { thread, channel } = await getThreadChannel(node_id);
   if (!thread || !channel || !channel.locked) return;
 
-  info(Actions.Unlocked, thread);
-
-  thread.locked = false;
-  if (channel.archived) {
-    thread.lockArchiving = true;
-    thread.lockLocking = true;
-    channel.setArchived(false);
-    channel.setLocked(false);
-    channel.setArchived(true);
-  } else {
-    channel.setLocked(false);
+  try {
+    thread.locked = false;
+    if (channel.archived) {
+      thread.lockArchiving = true;
+      thread.lockLocking = true;
+      await channel.setArchived(false);
+      await channel.setLocked(false);
+      await channel.setArchived(true);
+    } else {
+      await channel.setLocked(false);
+    }
+    info(Actions.Unlocked, thread);
+  } catch (err) {
+    thread.locked = true; // Revert on failure
+    logger.warn(
+      `Failed to unlock thread ${thread.id}: ${err instanceof Error ? err.message : "Unknown error"}`,
+    );
   }
 }
 
@@ -322,10 +371,15 @@ export async function deleteThread(node_id: string | undefined) {
   const { channel, thread } = await getThreadChannel(node_id);
   if (!thread || !channel) return;
 
-  info(Actions.Deleted, thread);
-
-  store.deleteThread(thread?.id);
-  channel.delete();
+  try {
+    await channel.delete();
+    store.deleteThread(thread?.id);
+    info(Actions.Deleted, thread);
+  } catch (err) {
+    logger.warn(
+      `Failed to delete thread ${thread.id}: ${err instanceof Error ? err.message : "Unknown error"}`,
+    );
+  }
 }
 
 export async function getThreadChannel(node_id: string | undefined): Promise<{
@@ -374,21 +428,27 @@ export async function addTagToThread(node_id: string, tagId: string) {
   // Set lock flag before making the change
   thread.lockTagging = true;
 
-  // Handle archived threads: unarchive, modify, re-archive
-  const wasArchived = channel.archived;
-  if (wasArchived) {
-    thread.lockArchiving = true;
-    await channel.setArchived(false);
+  try {
+    // Handle archived threads: unarchive, modify, re-archive
+    const wasArchived = channel.archived;
+    if (wasArchived) {
+      thread.lockArchiving = true;
+      await channel.setArchived(false);
+    }
+
+    await channel.setAppliedTags(newTags);
+    thread.appliedTags = newTags;
+
+    if (wasArchived) {
+      await channel.setArchived(true);
+    }
+
+    info(Actions.Tagged, thread);
+  } catch (err) {
+    logger.warn(
+      `Failed to add tag to thread ${thread.id}: ${err instanceof Error ? err.message : "Unknown error"}`,
+    );
   }
-
-  await channel.setAppliedTags(newTags);
-  thread.appliedTags = newTags;
-
-  if (wasArchived) {
-    await channel.setArchived(true);
-  }
-
-  info(Actions.Tagged, thread);
 }
 
 export async function removeTagFromThread(node_id: string, tagId: string) {
@@ -414,21 +474,27 @@ export async function removeTagFromThread(node_id: string, tagId: string) {
   // Set lock flag before making the change
   thread.lockTagging = true;
 
-  // Handle archived threads: unarchive, modify, re-archive
-  const wasArchived = channel.archived;
-  if (wasArchived) {
-    thread.lockArchiving = true;
-    await channel.setArchived(false);
+  try {
+    // Handle archived threads: unarchive, modify, re-archive
+    const wasArchived = channel.archived;
+    if (wasArchived) {
+      thread.lockArchiving = true;
+      await channel.setArchived(false);
+    }
+
+    await channel.setAppliedTags(newTags);
+    thread.appliedTags = newTags;
+
+    if (wasArchived) {
+      await channel.setArchived(true);
+    }
+
+    info(Actions.Untagged, thread);
+  } catch (err) {
+    logger.warn(
+      `Failed to remove tag from thread ${thread.id}: ${err instanceof Error ? err.message : "Unknown error"}`,
+    );
   }
-
-  await channel.setAppliedTags(newTags);
-  thread.appliedTags = newTags;
-
-  if (wasArchived) {
-    await channel.setArchived(true);
-  }
-
-  info(Actions.Untagged, thread);
 }
 
 export async function resetOpinionatedTags() {
@@ -436,7 +502,25 @@ export async function resetOpinionatedTags() {
     config.DISCORD_CHANNEL_ID,
   )) as ForumChannel;
 
-  await forum.setAvailableTags(OPINIONATED_TAGS);
+  const existingTags = forum.availableTags;
+  const existingByName = new Map(existingTags.map((t) => [t.name, t]));
+
+  // Keep existing tags that match opinionated names (preserves IDs + thread references),
+  // add missing ones, and keep any non-opinionated tags (e.g. kanban columns)
+  const opinionatedNames = new Set(OPINIONATED_TAGS.map((t) => t.name));
+  const mergedTags = [
+    // Existing tags that match opinionated names (preserve their Discord IDs)
+    ...existingTags.filter((t) => opinionatedNames.has(t.name)),
+    // New opinionated tags that don't exist yet
+    ...OPINIONATED_TAGS.filter((t) => !existingByName.has(t.name)),
+    // Non-opinionated existing tags (kanban columns, etc.)
+    ...existingTags.filter((t) => !opinionatedNames.has(t.name)),
+  ];
+
+  const added = OPINIONATED_TAGS.filter((t) => !existingByName.has(t.name));
+  if (added.length > 0) {
+    await forum.setAvailableTags(mergedTags);
+  }
 
   const refreshed = await forum.fetch();
   store.availableTags = refreshed.availableTags;
@@ -451,7 +535,7 @@ export async function resetOpinionatedTags() {
   }
 
   logger.info(
-    `Tag reset: ${store.availableTags.length} opinionated tags set, ${store.tagMap.size} mapped (${store.availableTags.length}/${TAG_BUDGET.total} slots used)`,
+    `Tag sync: ${added.length} new tags added, ${store.tagMap.size} mapped (${store.availableTags.length}/${TAG_BUDGET.total} slots used)`,
   );
 }
 
@@ -462,29 +546,25 @@ export async function resetOpinionatedLabels() {
     per_page: 100,
   });
 
-  // Delete every existing label (sequential to avoid rate limits)
-  let deletedCount = 0;
-  for (const label of existingLabels) {
-    await octokit.rest.issues.deleteLabel({
-      ...repoCredentials,
-      name: label.name,
-    });
-    deletedCount++;
-  }
+  const existingByName = new Map(existingLabels.map((l) => [l.name, l]));
 
-  // Create a label for each non-type opinionated tag
+  // Only create labels that don't already exist
   // Type tags (Bug/Feature/Task) are managed via GitHub native issue types
   const labelTags = OPINIONATED_TAGS.filter((t) => !t.isType);
+  let createdCount = 0;
   for (const tag of labelTags) {
-    await octokit.rest.issues.createLabel({
-      ...repoCredentials,
-      name: tag.name,
-      ...(tag.color && { color: tag.color }),
-    });
+    if (!existingByName.has(tag.name)) {
+      await octokit.rest.issues.createLabel({
+        ...repoCredentials,
+        name: tag.name,
+        ...(tag.color && { color: tag.color }),
+      });
+      createdCount++;
+    }
   }
 
   logger.info(
-    `Label reset: deleted ${deletedCount} old labels, created ${labelTags.length} opinionated labels (${TYPE_TAG_NAMES.size} type tags managed natively)`,
+    `Label sync: ${createdCount} new labels created, ${existingLabels.length} existing preserved (${TYPE_TAG_NAMES.size} type tags managed natively)`,
   );
 }
 
@@ -612,21 +692,27 @@ export async function updateKanbanTag(
   // Set lock flag before making Discord API calls
   thread.lockTagging = true;
 
-  // Handle archived threads: unarchive, modify, re-archive
-  const wasArchived = channel.archived;
-  if (wasArchived) {
-    thread.lockArchiving = true;
-    await channel.setArchived(false);
+  try {
+    // Handle archived threads: unarchive, modify, re-archive
+    const wasArchived = channel.archived;
+    if (wasArchived) {
+      thread.lockArchiving = true;
+      await channel.setArchived(false);
+    }
+
+    await channel.setAppliedTags(newTags);
+    thread.appliedTags = newTags;
+
+    if (wasArchived) {
+      await channel.setArchived(true);
+    }
+
+    info(Actions.Tagged, thread);
+  } catch (err) {
+    logger.warn(
+      `Failed to update kanban tag for thread ${thread.id}: ${err instanceof Error ? err.message : "Unknown error"}`,
+    );
   }
-
-  await channel.setAppliedTags(newTags);
-  thread.appliedTags = newTags;
-
-  if (wasArchived) {
-    await channel.setArchived(true);
-  }
-
-  info(Actions.Tagged, thread);
 }
 
 export async function enrichThreadAfterIssueCreation(thread: Thread) {
