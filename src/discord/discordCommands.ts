@@ -2,8 +2,10 @@ import {
   ChannelType,
   ChatInputCommandInteraction,
   Collection,
+  ForumChannel,
   Message,
   PermissionFlagsBits,
+  PublicThreadChannel,
   REST,
   Routes,
   SlashCommandBuilder,
@@ -267,33 +269,46 @@ export async function handleSyncThreadCommand(
   if (
     !channel ||
     !channel.isThread() ||
-    channel.type !== ChannelType.PublicThread ||
-    channel.parentId !== config.DISCORD_CHANNEL_ID
+    channel.type !== ChannelType.PublicThread
   ) {
     await interaction.editReply(
-      "This command must be run inside a forum thread in the configured channel.",
+      "This command must be run inside a forum thread.",
     );
     return;
   }
 
-  // Check if thread is already linked to a GitHub issue
-  const thread = store.threads.find((t) => t.id === channel.id);
-  if (!thread) {
-    await interaction.editReply(
-      "This thread is not tracked. Try creating a new post in the forum.",
-    );
-    return;
+  const isMainForum = channel.parentId === config.DISCORD_CHANNEL_ID;
+
+  // For main forum threads, check if already linked
+  if (isMainForum) {
+    const thread = store.threads.find((t) => t.id === channel.id);
+    if (!thread) {
+      await interaction.editReply(
+        "This thread is not tracked. Try creating a new post in the forum.",
+      );
+      return;
+    }
+
+    if (thread.number) {
+      const issueUrl = `https://github.com/${config.GITHUB_OWNER}/${config.GITHUB_REPOSITORY}/issues/${thread.number}`;
+      await interaction.editReply(
+        `This thread is already linked to issue #${thread.number}: ${issueUrl}`,
+      );
+      return;
+    }
+
+    return await syncMainForumThread(interaction, channel, thread);
   }
 
-  if (thread.number) {
-    const issueUrl = `https://github.com/${config.GITHUB_OWNER}/${config.GITHUB_REPOSITORY}/issues/${thread.number}`;
-    await interaction.editReply(
-      `This thread is already linked to issue #${thread.number}: ${issueUrl}`,
-    );
-    return;
-  }
+  // Non-main forum: create both a GitHub issue and a Discord thread in the main forum
+  return await syncExternalThread(interaction, channel);
+}
 
-  // Fetch all messages from the thread
+async function syncMainForumThread(
+  interaction: ChatInputCommandInteraction,
+  channel: PublicThreadChannel,
+  thread: (typeof store.threads)[number],
+) {
   await interaction.editReply("Fetching messages...");
   const allMessages = await fetchAllMessages((opts) =>
     channel.messages.fetch(opts),
@@ -307,7 +322,6 @@ export async function handleSyncThreadCommand(
     return;
   }
 
-  // First non-bot message becomes the issue body
   const firstMessage = userMessages[0];
   await interaction.editReply("Creating GitHub issue...");
   await createIssue(thread, firstMessage);
@@ -317,10 +331,8 @@ export async function handleSyncThreadCommand(
     return;
   }
 
-  // Add cross-links (rename thread with [#N], send GitHub URL, write Discord URL to GitHub body)
   await enrichThreadAfterIssueCreation(thread);
 
-  // Replay remaining non-bot messages as GitHub comments
   const remainingMessages = userMessages.slice(1);
   if (remainingMessages.length > 0) {
     await interaction.editReply(
@@ -336,5 +348,91 @@ export async function handleSyncThreadCommand(
   const issueUrl = `https://github.com/${config.GITHUB_OWNER}/${config.GITHUB_REPOSITORY}/issues/${thread.number}`;
   await interaction.editReply(
     `Created issue #${thread.number} with ${remainingMessages.length} comment(s): ${issueUrl}`,
+  );
+}
+
+async function syncExternalThread(
+  interaction: ChatInputCommandInteraction,
+  sourceChannel: PublicThreadChannel,
+) {
+  // Fetch all messages from the source thread
+  await interaction.editReply("Fetching messages...");
+  const allMessages = await fetchAllMessages((opts) =>
+    sourceChannel.messages.fetch(opts),
+  );
+  const userMessages = allMessages.filter((m) => !m.author.bot);
+
+  if (userMessages.length === 0) {
+    await interaction.editReply(
+      "No non-bot messages found in this thread to create an issue from.",
+    );
+    return;
+  }
+
+  // Create a new thread in the main forum
+  await interaction.editReply("Creating Discord thread in main forum...");
+  const forum = client.channels.cache.get(
+    config.DISCORD_CHANNEL_ID,
+  ) as ForumChannel;
+
+  const firstMessage = userMessages[0];
+  const authorName =
+    firstMessage.author.globalName ||
+    firstMessage.author.displayName ||
+    firstMessage.author.username;
+
+  const forumThread = await forum.threads.create({
+    message: {
+      content: `**${authorName}** (synced from <#${sourceChannel.id}>):\n\n${firstMessage.content || "*(no content)*"}`,
+    },
+    name: sourceChannel.name,
+    appliedTags: [],
+  });
+
+  // Register in store
+  store.threads.push({
+    id: forumThread.id,
+    title: sourceChannel.name,
+    appliedTags: [...forumThread.appliedTags],
+    comments: [],
+    archived: false,
+    locked: false,
+  });
+
+  const thread = store.threads.find((t) => t.id === forumThread.id)!;
+
+  // Create GitHub issue from the first message
+  await interaction.editReply("Creating GitHub issue...");
+  await createIssue(thread, firstMessage);
+
+  if (!thread.number) {
+    await interaction.editReply("Failed to create GitHub issue.");
+    return;
+  }
+
+  // Cross-link the new main-forum thread
+  await enrichThreadAfterIssueCreation(thread);
+
+  // Replay remaining messages as GitHub comments + Discord messages in the new thread
+  const remainingMessages = userMessages.slice(1);
+  if (remainingMessages.length > 0) {
+    await interaction.editReply(
+      `Replaying ${remainingMessages.length} message(s)...`,
+    );
+
+    for (const msg of remainingMessages) {
+      await createIssueComment(thread, msg);
+
+      const name =
+        msg.author.globalName || msg.author.displayName || msg.author.username;
+      await forumThread.send(`**${name}:**\n${msg.content}`);
+
+      await delay(1000);
+    }
+  }
+
+  const issueUrl = `https://github.com/${config.GITHUB_OWNER}/${config.GITHUB_REPOSITORY}/issues/${thread.number}`;
+  await interaction.editReply(
+    `Created issue #${thread.number} with ${remainingMessages.length} comment(s): ${issueUrl}\nDiscord thread: <#${forumThread.id}>`,
   );
 }
