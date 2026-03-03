@@ -168,8 +168,8 @@ export async function createThread({
     const imageEmbeds = createImageEmbeds(imageUrls);
     const displayBody = imageUrls.length > 0 ? stripImageSyntax(body) : body;
 
-    // Build the message content and truncate to Discord's 4000 char limit
-    const DISCORD_MAX_CONTENT = 4000;
+    // Build the message content and truncate to Discord's 2000 char limit
+    const DISCORD_MAX_CONTENT = 2000;
     const prefix = `**${login}** opened this issue on GitHub: ${issueUrl}\n\n`;
     const truncationNote = `\n\n... [truncated - see full issue on GitHub](${issueUrl})`;
     const bodyText = displayBody || "*No description provided.*";
