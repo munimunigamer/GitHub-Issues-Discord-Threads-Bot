@@ -245,11 +245,22 @@ export function parseIssueReferences(body: string | null | undefined): {
   return { closing, referencing };
 }
 
+// Discord embed colors (matching GitHub's color language)
+const ActivityColor = {
+  PR_OPEN: 0x238636, // Green — new PR
+  PR_MERGED: 0x8957e5, // Purple — merged
+  ASSIGNED: 0x2f81f7, // Blue — assignment
+  UNASSIGNED: 0x848d97, // Gray — removal
+  MILESTONE: 0xd29922, // Gold — milestone
+  TRANSFER: 0xdb6d28, // Orange — transfer
+  EDITED: 0x2f81f7, // Blue — edit
+};
+
 export async function handlePullRequestOpened(req: Request) {
   const pr = req.body.pull_request;
   if (!pr) return;
   const { login, avatar_url } = req.body.sender;
-  const prLink = `[${pr.title} #${pr.number}](${pr.html_url})`;
+  const prLink = `[#${pr.number} ${pr.title}](${pr.html_url})`;
   const { closing, referencing } = parseIssueReferences(pr.body);
 
   for (const num of referencing) {
@@ -257,7 +268,9 @@ export async function handlePullRequestOpened(req: Request) {
       number: num,
       login,
       avatar_url,
-      content: `opened pull request ${prLink} referencing this issue`,
+      title: "Pull Request Opened",
+      description: `${prLink}\nThis pull request references this issue.`,
+      color: ActivityColor.PR_OPEN,
     });
   }
   for (const num of closing) {
@@ -265,7 +278,9 @@ export async function handlePullRequestOpened(req: Request) {
       number: num,
       login,
       avatar_url,
-      content: `opened pull request ${prLink} that will close this issue`,
+      title: "Pull Request Opened",
+      description: `${prLink}\nThis pull request will close this issue when merged.`,
+      color: ActivityColor.PR_OPEN,
     });
   }
 }
@@ -274,16 +289,17 @@ export async function handlePullRequestMerged(req: Request) {
   const pr = req.body.pull_request;
   if (!pr || !pr.merged) return;
   const { login, avatar_url } = req.body.sender;
-  const prLink = `[${pr.title} #${pr.number}](${pr.html_url})`;
+  const prLink = `[#${pr.number} ${pr.title}](${pr.html_url})`;
   const { closing, referencing } = parseIssueReferences(pr.body);
 
-  const nonClosing = referencing;
-  for (const num of nonClosing) {
+  for (const num of referencing) {
     await sendActivityMessageByNumber({
       number: num,
       login,
       avatar_url,
-      content: `merged pull request ${prLink}`,
+      title: "Pull Request Merged",
+      description: `${prLink}`,
+      color: ActivityColor.PR_MERGED,
     });
   }
   for (const num of closing) {
@@ -291,7 +307,9 @@ export async function handlePullRequestMerged(req: Request) {
       number: num,
       login,
       avatar_url,
-      content: `merged pull request ${prLink}, closing this issue`,
+      title: "Pull Request Merged",
+      description: `${prLink}\nThis issue has been closed.`,
+      color: ActivityColor.PR_MERGED,
     });
   }
 }
@@ -306,7 +324,9 @@ export async function handleAssigned(req: Request) {
     node_id,
     login,
     avatar_url,
-    content: `assigned **${assignee}**`,
+    title: "Assignee Added",
+    description: `**${assignee}** has been assigned to this issue.`,
+    color: ActivityColor.ASSIGNED,
   });
 }
 
@@ -320,7 +340,9 @@ export async function handleUnassigned(req: Request) {
     node_id,
     login,
     avatar_url,
-    content: `unassigned **${assignee}**`,
+    title: "Assignee Removed",
+    description: `**${assignee}** has been unassigned from this issue.`,
+    color: ActivityColor.UNASSIGNED,
   });
 }
 
@@ -334,7 +356,9 @@ export async function handleMilestoned(req: Request) {
     node_id,
     login,
     avatar_url,
-    content: `added this to milestone **${milestoneName}**`,
+    title: "Milestone Added",
+    description: `This issue has been added to milestone **${milestoneName}**.`,
+    color: ActivityColor.MILESTONE,
   });
 }
 
@@ -348,7 +372,9 @@ export async function handleDemilestoned(req: Request) {
     node_id,
     login,
     avatar_url,
-    content: `removed this from milestone **${milestoneName}**`,
+    title: "Milestone Removed",
+    description: `This issue has been removed from milestone **${milestoneName}**.`,
+    color: ActivityColor.UNASSIGNED,
   });
 }
 
@@ -363,7 +389,9 @@ export async function handleTransferred(req: Request) {
     node_id,
     login,
     avatar_url,
-    content: `transferred this issue to **${repoFullName}**`,
+    title: "Issue Transferred",
+    description: `This issue has been transferred to **${repoFullName}**.`,
+    color: ActivityColor.TRANSFER,
   });
 }
 
@@ -381,7 +409,9 @@ export async function handleEdited(req: Request) {
     node_id,
     login,
     avatar_url,
-    content: `changed the title: ~~${oldTitle}~~ -> ${newTitle}`,
+    title: "Title Changed",
+    description: `~~${oldTitle}~~\n${newTitle}`,
+    color: ActivityColor.EDITED,
   });
 
   // Rename the Discord thread to match (preserve [#N] suffix)

@@ -293,12 +293,16 @@ export async function sendActivityMessage({
   node_id,
   login,
   avatar_url,
-  content,
+  title,
+  description,
+  color,
 }: {
   node_id: string;
   login: string;
   avatar_url: string;
-  content: string;
+  title: string;
+  description: string;
+  color: number;
 }) {
   const { thread, channel } = await getThreadChannel(node_id);
   if (!thread || !channel) return;
@@ -310,8 +314,14 @@ export async function sendActivityMessage({
     });
     if (!webhook) return;
 
+    const embed = new EmbedBuilder()
+      .setTitle(title)
+      .setDescription(description)
+      .setColor(color)
+      .setTimestamp();
+
     const messagePayload = MessagePayload.create(webhook, {
-      content,
+      embeds: [embed],
       threadId: thread.id,
     }).resolveBody();
     await webhook.send(messagePayload);
@@ -329,12 +339,16 @@ export async function sendActivityMessageByNumber({
   number,
   login,
   avatar_url,
-  content,
+  title,
+  description,
+  color,
 }: {
   number: number;
   login: string;
   avatar_url: string;
-  content: string;
+  title: string;
+  description: string;
+  color: number;
 }) {
   const thread = store.threads.find((t) => t.number === number);
   if (!thread?.node_id) return;
@@ -343,7 +357,9 @@ export async function sendActivityMessageByNumber({
     node_id: thread.node_id,
     login,
     avatar_url,
-    content,
+    title,
+    description,
+    color,
   });
 }
 
