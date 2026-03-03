@@ -356,6 +356,44 @@ export async function removeLabelFromIssue(thread: Thread, label: string) {
   }
 }
 
+export async function getIssue(issueNumber: number) {
+  try {
+    const response = await octokit.rest.issues.get({
+      ...repoCredentials,
+      issue_number: issueNumber,
+    });
+    return response.data;
+  } catch (err) {
+    if (
+      err instanceof Error &&
+      "status" in err &&
+      (err as any).status === 404
+    ) {
+      return null;
+    }
+    error(
+      `Failed to get issue #${issueNumber}: ${err instanceof Error ? err.message : "Unknown error"}`,
+    );
+    return null;
+  }
+}
+
+export async function getIssueComments(issueNumber: number) {
+  try {
+    const comments = await octokit.paginate(octokit.rest.issues.listComments, {
+      ...repoCredentials,
+      issue_number: issueNumber,
+      per_page: 100,
+    });
+    return comments;
+  } catch (err) {
+    error(
+      `Failed to get comments for issue #${issueNumber}: ${err instanceof Error ? err.message : "Unknown error"}`,
+    );
+    return [];
+  }
+}
+
 export async function getIssues() {
   try {
     const response = await octokit.rest.issues.listForRepo({

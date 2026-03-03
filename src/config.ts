@@ -11,6 +11,7 @@ const {
   GITHUB_REPOSITORY,
   GITHUB_WEBHOOK_SECRET,
   DISCORD_CHANNEL_ID,
+  DISCORD_GUILD_ID,
 } = process.env;
 
 if (
@@ -21,7 +22,8 @@ if (
   !GITHUB_OWNER ||
   !GITHUB_REPOSITORY ||
   !GITHUB_WEBHOOK_SECRET ||
-  !DISCORD_CHANNEL_ID
+  !DISCORD_CHANNEL_ID ||
+  !DISCORD_GUILD_ID
 ) {
   throw new Error("Missing environment variables");
 }
@@ -38,4 +40,5 @@ export const config = {
   GITHUB_REPOSITORY,
   GITHUB_WEBHOOK_SECRET,
   DISCORD_CHANNEL_ID,
+  DISCORD_GUILD_ID,
 };

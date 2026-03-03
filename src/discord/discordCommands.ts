@@ -1,0 +1,340 @@
+import {
+  ChannelType,
+  ChatInputCommandInteraction,
+  Collection,
+  Message,
+  PermissionFlagsBits,
+  REST,
+  Routes,
+  SlashCommandBuilder,
+} from "discord.js";
+import { config } from "../config";
+import {
+  createIssue,
+  createIssueComment,
+  getIssue,
+  getIssueComments,
+} from "../github/githubActions";
+import { logger } from "../logger";
+import { store } from "../store";
+import {
+  archiveThread,
+  createComment,
+  createThread,
+  enrichThreadAfterIssueCreation,
+  lockThread,
+} from "./discordActions";
+import client from "./discord";
+
+const syncIssueCommand = new SlashCommandBuilder()
+  .setName("sync-issue")
+  .setDescription(
+    "Create a Discord thread from an existing GitHub issue and replay its comments",
+  )
+  .addStringOption((option) =>
+    option
+      .setName("issue")
+      .setDescription(
+        "GitHub issue number or URL (e.g. 42 or https://github.com/owner/repo/issues/42)",
+      )
+      .setRequired(true),
+  )
+  .setDefaultMemberPermissions(PermissionFlagsBits.ManageThreads);
+
+const syncThreadCommand = new SlashCommandBuilder()
+  .setName("sync-thread")
+  .setDescription(
+    "Create a GitHub issue from this forum thread and replay all messages as comments",
+  )
+  .setDefaultMemberPermissions(PermissionFlagsBits.ManageThreads);
+
+export async function registerCommands() {
+  const rest = new REST({ version: "10" }).setToken(config.DISCORD_TOKEN);
+
+  try {
+    await rest.put(
+      Routes.applicationGuildCommands(client.user!.id, config.DISCORD_GUILD_ID),
+      {
+        body: [syncIssueCommand.toJSON(), syncThreadCommand.toJSON()],
+      },
+    );
+    logger.info("Slash commands: Registered /sync-issue, /sync-thread");
+  } catch (err) {
+    logger.error(
+      `Slash commands: Failed to register: ${err instanceof Error ? err.message : "Unknown error"}`,
+    );
+  }
+}
+
+export function parseIssueInput(input: string): number | null {
+  // Try plain number
+  const asNumber = Number(input);
+  if (Number.isInteger(asNumber) && asNumber > 0) return asNumber;
+
+  // Try GitHub URL: https://github.com/owner/repo/issues/N
+  const urlRegex =
+    /^https?:\/\/github\.com\/([^/]+)\/([^/]+)\/issues\/(\d+)\/?$/;
+  const match = input.match(urlRegex);
+  if (!match) return null;
+
+  const [, owner, repo, num] = match;
+  if (
+    owner.toLowerCase() !== config.GITHUB_OWNER.toLowerCase() ||
+    repo.toLowerCase() !== config.GITHUB_REPOSITORY.toLowerCase()
+  ) {
+    return null; // Wrong repo
+  }
+
+  return Number(num);
+}
+
+function resolveAppliedTags(
+  labels: { name: string }[],
+  issueTypeName?: string,
+): string[] {
+  const appliedTags = (labels || [])
+    .map((label) => store.tagMap.get(label.name))
+    .filter((tagId): tagId is string => tagId !== undefined)
+    .slice(0, 5);
+
+  if (issueTypeName) {
+    const typeTagId = store.tagMap.get(issueTypeName);
+    if (
+      typeTagId &&
+      !appliedTags.includes(typeTagId) &&
+      appliedTags.length < 5
+    ) {
+      appliedTags.push(typeTagId);
+    }
+  }
+
+  if (appliedTags.length === 0) {
+    const fallbackTagId = store.tagMap.get("Needs Triage");
+    if (fallbackTagId) {
+      appliedTags.push(fallbackTagId);
+    }
+  }
+
+  return appliedTags;
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export async function handleSyncIssueCommand(
+  interaction: ChatInputCommandInteraction,
+) {
+  await interaction.deferReply({ ephemeral: true });
+
+  const input = interaction.options.getString("issue", true);
+  const issueNumber = parseIssueInput(input);
+
+  if (!issueNumber) {
+    await interaction.editReply(
+      "Invalid input. Provide a GitHub issue number or a URL like `https://github.com/owner/repo/issues/42`.",
+    );
+    return;
+  }
+
+  // Check if thread already exists
+  const existing = store.threads.find((t) => t.number === issueNumber);
+  if (existing) {
+    await interaction.editReply(
+      `Issue #${issueNumber} is already synced: <#${existing.id}>`,
+    );
+    return;
+  }
+
+  // Fetch issue from GitHub
+  await interaction.editReply(`Fetching issue #${issueNumber} from GitHub...`);
+  const issue = await getIssue(issueNumber);
+
+  if (!issue) {
+    await interaction.editReply(`Issue #${issueNumber} was not found.`);
+    return;
+  }
+
+  // Guard against PRs (GitHub treats PRs as issues in the API)
+  if (issue.pull_request) {
+    await interaction.editReply(
+      `#${issueNumber} is a pull request, not an issue.`,
+    );
+    return;
+  }
+
+  // Resolve tags from labels and issue type
+  const appliedTags = resolveAppliedTags(
+    issue.labels.filter(
+      (l): l is { name: string } =>
+        typeof l !== "string" && "name" in l && typeof l.name === "string",
+    ),
+    (issue as any).type?.name,
+  );
+
+  // Create Discord thread
+  await interaction.editReply(`Creating thread for issue #${issueNumber}...`);
+  await createThread({
+    body: issue.body || "",
+    login: issue.user?.login || "unknown",
+    title: issue.title,
+    appliedTags,
+    node_id: issue.node_id,
+    number: issue.number,
+  });
+
+  // Find the newly created thread in store
+  const thread = store.threads.find((t) => t.node_id === issue.node_id);
+  if (!thread) {
+    await interaction.editReply(
+      `Failed to create thread for issue #${issueNumber}.`,
+    );
+    return;
+  }
+
+  // Fetch and replay comments
+  const comments = await getIssueComments(issueNumber);
+  const filteredComments = comments.filter(
+    (c) => !c.body?.includes("discord.com/channels/"),
+  );
+
+  if (filteredComments.length > 0) {
+    await interaction.editReply(
+      `Replaying ${filteredComments.length} comment(s)...`,
+    );
+
+    for (const comment of filteredComments) {
+      await createComment({
+        git_id: comment.id,
+        body: comment.body || "",
+        login: comment.user?.login || "unknown",
+        avatar_url:
+          comment.user?.avatar_url ||
+          "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png",
+        node_id: issue.node_id,
+      });
+      await delay(1000);
+    }
+  }
+
+  // Archive if closed, lock if locked
+  if (issue.state === "closed") {
+    await archiveThread(issue.node_id);
+  }
+  if (issue.locked) {
+    await lockThread(issue.node_id);
+  }
+
+  await interaction.editReply(
+    `Synced issue #${issueNumber} with ${filteredComments.length} comment(s): <#${thread.id}>`,
+  );
+}
+
+async function fetchAllMessages(
+  fetchFn: (options: {
+    limit: number;
+    before?: string;
+  }) => Promise<Collection<string, Message>>,
+): Promise<Message[]> {
+  const all: Message[] = [];
+  let before: string | undefined;
+
+  while (true) {
+    const options: { limit: number; before?: string } = { limit: 100 };
+    if (before) options.before = before;
+
+    const batch = await fetchFn(options);
+    if (batch.size === 0) break;
+
+    all.push(...batch.values());
+    before = batch.last()!.id;
+
+    if (batch.size < 100) break;
+  }
+
+  // Discord returns newest-first; reverse to chronological order
+  return all.reverse();
+}
+
+export async function handleSyncThreadCommand(
+  interaction: ChatInputCommandInteraction,
+) {
+  await interaction.deferReply({ ephemeral: true });
+
+  const channel = interaction.channel;
+
+  // Validate: must be inside a forum thread
+  if (
+    !channel ||
+    !channel.isThread() ||
+    channel.type !== ChannelType.PublicThread ||
+    channel.parentId !== config.DISCORD_CHANNEL_ID
+  ) {
+    await interaction.editReply(
+      "This command must be run inside a forum thread in the configured channel.",
+    );
+    return;
+  }
+
+  // Check if thread is already linked to a GitHub issue
+  const thread = store.threads.find((t) => t.id === channel.id);
+  if (!thread) {
+    await interaction.editReply(
+      "This thread is not tracked. Try creating a new post in the forum.",
+    );
+    return;
+  }
+
+  if (thread.number) {
+    const issueUrl = `https://github.com/${config.GITHUB_OWNER}/${config.GITHUB_REPOSITORY}/issues/${thread.number}`;
+    await interaction.editReply(
+      `This thread is already linked to issue #${thread.number}: ${issueUrl}`,
+    );
+    return;
+  }
+
+  // Fetch all messages from the thread
+  await interaction.editReply("Fetching messages...");
+  const allMessages = await fetchAllMessages((opts) =>
+    channel.messages.fetch(opts),
+  );
+  const userMessages = allMessages.filter((m) => !m.author.bot);
+
+  if (userMessages.length === 0) {
+    await interaction.editReply(
+      "No non-bot messages found in this thread to create an issue from.",
+    );
+    return;
+  }
+
+  // First non-bot message becomes the issue body
+  const firstMessage = userMessages[0];
+  await interaction.editReply("Creating GitHub issue...");
+  await createIssue(thread, firstMessage);
+
+  if (!thread.number) {
+    await interaction.editReply("Failed to create GitHub issue.");
+    return;
+  }
+
+  // Add cross-links (rename thread with [#N], send GitHub URL, write Discord URL to GitHub body)
+  await enrichThreadAfterIssueCreation(thread);
+
+  // Replay remaining non-bot messages as GitHub comments
+  const remainingMessages = userMessages.slice(1);
+  if (remainingMessages.length > 0) {
+    await interaction.editReply(
+      `Replaying ${remainingMessages.length} message(s) as comments...`,
+    );
+
+    for (const msg of remainingMessages) {
+      await createIssueComment(thread, msg);
+      await delay(1000);
+    }
+  }
+
+  const issueUrl = `https://github.com/${config.GITHUB_OWNER}/${config.GITHUB_REPOSITORY}/issues/${thread.number}`;
+  await interaction.editReply(
+    `Created issue #${thread.number} with ${remainingMessages.length} comment(s): ${issueUrl}`,
+  );
+}

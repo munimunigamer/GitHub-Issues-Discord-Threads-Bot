@@ -3,6 +3,7 @@ import {
   Client,
   DMChannel,
   ForumChannel,
+  Interaction,
   Message,
   NonThreadGuildBasedChannel,
   PartialMessage,
@@ -36,6 +37,11 @@ import {
   enrichThreadAfterIssueCreation,
   TYPE_TAG_NAMES,
 } from "./discordActions";
+import {
+  registerCommands,
+  handleSyncIssueCommand,
+  handleSyncThreadCommand,
+} from "./discordCommands";
 
 export async function handleClientReady(client: Client) {
   logger.info(`Logged in as ${client.user?.tag}!`);
@@ -110,6 +116,18 @@ export async function handleClientReady(client: Client) {
     logger.error(
       `Kanban init failed: ${err instanceof Error ? err.message : "Unknown error"}`,
     );
+  }
+
+  await registerCommands();
+}
+
+export async function handleInteractionCreate(interaction: Interaction) {
+  if (!interaction.isChatInputCommand()) return;
+
+  if (interaction.commandName === "sync-issue") {
+    await handleSyncIssueCommand(interaction);
+  } else if (interaction.commandName === "sync-thread") {
+    await handleSyncThreadCommand(interaction);
   }
 }
 
