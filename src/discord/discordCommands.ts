@@ -301,7 +301,16 @@ export async function handleSyncThreadCommand(
   }
 
   // Non-main forum: create both a GitHub issue and a Discord thread in the main forum
-  return await syncExternalThread(interaction, channel);
+  try {
+    return await syncExternalThread(interaction, channel);
+  } catch (err) {
+    logger.error(
+      `sync-thread failed: ${err instanceof Error ? err.message : "Unknown error"}`,
+    );
+    await interaction.editReply(
+      `Failed to sync thread: ${err instanceof Error ? err.message : "Unknown error"}`,
+    );
+  }
 }
 
 async function syncMainForumThread(
@@ -381,12 +390,17 @@ async function syncExternalThread(
     firstMessage.author.displayName ||
     firstMessage.author.username;
 
+  // Forum requires at least one tag — use "Needs Triage" fallback
+  const appliedTags: string[] = [];
+  const fallbackTagId = store.tagMap.get("Needs Triage");
+  if (fallbackTagId) appliedTags.push(fallbackTagId);
+
   const forumThread = await forum.threads.create({
     message: {
       content: `**${authorName}** (synced from <#${sourceChannel.id}>):\n\n${firstMessage.content || "*(no content)*"}`,
     },
     name: sourceChannel.name,
-    appliedTags: [],
+    appliedTags,
   });
 
   // Register in store
