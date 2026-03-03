@@ -38,6 +38,7 @@ export const Actions = {
   DeletedComment: "deleted comment",
   Tagged: "tagged",
   Untagged: "untagged",
+  Referenced: "referenced",
 } as const;
 
 export type ActionValue = (typeof Actions)[keyof typeof Actions];

@@ -5,8 +5,11 @@ import {
   createComment,
   createThread,
   deleteThread,
+  getThreadChannel,
   lockThread,
   removeTagFromThread,
+  sendActivityMessage,
+  sendActivityMessageByNumber,
   TYPE_TAG_NAMES,
   unarchiveThread,
   unlockThread,
@@ -61,7 +64,7 @@ export async function handleOpened(req: Request) {
     }
   }
 
-  createThread({ login, appliedTags, number, title, body, node_id });
+  await createThread({ login, appliedTags, number, title, body, node_id });
 }
 
 export async function handleCreated(req: Request) {
@@ -210,6 +213,207 @@ export async function handleUnlabeled(req: Request) {
   if (!tagId) return;
 
   await removeTagFromThread(node_id, tagId);
+}
+
+// --- Activity event handlers ---
+
+/** Parse `#N` references from a PR body, distinguishing closing keywords from plain references. */
+export function parseIssueReferences(body: string | null | undefined): {
+  closing: number[];
+  referencing: number[];
+} {
+  const closing: number[] = [];
+  const referencing: number[] = [];
+  if (!body) return { closing, referencing };
+
+  const closingRegex = /(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/gi;
+  const closingNumbers = new Set<number>();
+  let match;
+  while ((match = closingRegex.exec(body)) !== null) {
+    closingNumbers.add(Number(match[1]));
+  }
+  closing.push(...closingNumbers);
+
+  const refRegex = /#(\d+)/g;
+  while ((match = refRegex.exec(body)) !== null) {
+    const num = Number(match[1]);
+    if (!closingNumbers.has(num) && !referencing.includes(num)) {
+      referencing.push(num);
+    }
+  }
+
+  return { closing, referencing };
+}
+
+export async function handlePullRequestOpened(req: Request) {
+  const pr = req.body.pull_request;
+  if (!pr) return;
+  const { login, avatar_url } = req.body.sender;
+  const prLink = `[${pr.title} #${pr.number}](${pr.html_url})`;
+  const { closing, referencing } = parseIssueReferences(pr.body);
+
+  for (const num of referencing) {
+    await sendActivityMessageByNumber({
+      number: num,
+      login,
+      avatar_url,
+      content: `opened pull request ${prLink} referencing this issue`,
+    });
+  }
+  for (const num of closing) {
+    await sendActivityMessageByNumber({
+      number: num,
+      login,
+      avatar_url,
+      content: `opened pull request ${prLink} that will close this issue`,
+    });
+  }
+}
+
+export async function handlePullRequestMerged(req: Request) {
+  const pr = req.body.pull_request;
+  if (!pr || !pr.merged) return;
+  const { login, avatar_url } = req.body.sender;
+  const prLink = `[${pr.title} #${pr.number}](${pr.html_url})`;
+  const { closing, referencing } = parseIssueReferences(pr.body);
+
+  const nonClosing = referencing;
+  for (const num of nonClosing) {
+    await sendActivityMessageByNumber({
+      number: num,
+      login,
+      avatar_url,
+      content: `merged pull request ${prLink}`,
+    });
+  }
+  for (const num of closing) {
+    await sendActivityMessageByNumber({
+      number: num,
+      login,
+      avatar_url,
+      content: `merged pull request ${prLink}, closing this issue`,
+    });
+  }
+}
+
+export async function handleAssigned(req: Request) {
+  if (!req.body.issue || !req.body.assignee) return;
+  const { login, avatar_url } = req.body.sender;
+  const node_id = req.body.issue.node_id;
+  const assignee = req.body.assignee.login;
+
+  await sendActivityMessage({
+    node_id,
+    login,
+    avatar_url,
+    content: `assigned **${assignee}**`,
+  });
+}
+
+export async function handleUnassigned(req: Request) {
+  if (!req.body.issue || !req.body.assignee) return;
+  const { login, avatar_url } = req.body.sender;
+  const node_id = req.body.issue.node_id;
+  const assignee = req.body.assignee.login;
+
+  await sendActivityMessage({
+    node_id,
+    login,
+    avatar_url,
+    content: `unassigned **${assignee}**`,
+  });
+}
+
+export async function handleMilestoned(req: Request) {
+  if (!req.body.issue || !req.body.milestone) return;
+  const { login, avatar_url } = req.body.sender;
+  const node_id = req.body.issue.node_id;
+  const milestoneName = req.body.milestone.title;
+
+  await sendActivityMessage({
+    node_id,
+    login,
+    avatar_url,
+    content: `added this to milestone **${milestoneName}**`,
+  });
+}
+
+export async function handleDemilestoned(req: Request) {
+  if (!req.body.issue || !req.body.milestone) return;
+  const { login, avatar_url } = req.body.sender;
+  const node_id = req.body.issue.node_id;
+  const milestoneName = req.body.milestone.title;
+
+  await sendActivityMessage({
+    node_id,
+    login,
+    avatar_url,
+    content: `removed this from milestone **${milestoneName}**`,
+  });
+}
+
+export async function handleTransferred(req: Request) {
+  if (!req.body.issue) return;
+  const { login, avatar_url } = req.body.sender;
+  const node_id = req.body.issue.node_id;
+  const newRepo = req.body.changes?.new_repository;
+  const repoFullName = newRepo ? newRepo.full_name : "another repository";
+
+  await sendActivityMessage({
+    node_id,
+    login,
+    avatar_url,
+    content: `transferred this issue to **${repoFullName}**`,
+  });
+}
+
+export async function handleEdited(req: Request) {
+  if (!req.body.issue) return;
+  const changes = req.body.changes;
+  if (!changes?.title) return; // Only act on title changes
+
+  const { login, avatar_url } = req.body.sender;
+  const node_id = req.body.issue.node_id;
+  const oldTitle = changes.title.from;
+  const newTitle = req.body.issue.title;
+
+  await sendActivityMessage({
+    node_id,
+    login,
+    avatar_url,
+    content: `changed the title: ~~${oldTitle}~~ -> ${newTitle}`,
+  });
+
+  // Rename the Discord thread to match (preserve [#N] suffix)
+  const { thread, channel } = await getThreadChannel(node_id);
+  if (!thread || !channel) return;
+
+  const number = thread.number;
+  if (number) {
+    const suffix = ` [#${number}]`;
+    const maxBase = 100 - suffix.length;
+    const newName =
+      newTitle.length + suffix.length > 100
+        ? newTitle.slice(0, maxBase) + suffix
+        : newTitle + suffix;
+
+    try {
+      const wasArchived = channel.archived;
+      if (wasArchived) {
+        thread.lockArchiving = true;
+        await channel.setArchived(false);
+      }
+      await channel.setName(newName);
+      thread.title = newName;
+      if (wasArchived) {
+        await channel.setArchived(true);
+      }
+    } catch (err) {
+      logger.warn(
+        `Failed to rename thread ${thread.id}: ${err instanceof Error ? err.message : "Unknown error"}`,
+      );
+    }
+  }
 }
 
 export async function handleProjectItemEdited(req: Request) {

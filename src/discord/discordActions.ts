@@ -289,6 +289,64 @@ export async function createComment({
     .catch(console.error);
 }
 
+export async function sendActivityMessage({
+  node_id,
+  login,
+  avatar_url,
+  content,
+}: {
+  node_id: string;
+  login: string;
+  avatar_url: string;
+  content: string;
+}) {
+  const { thread, channel } = await getThreadChannel(node_id);
+  if (!thread || !channel) return;
+
+  try {
+    const webhook = await channel.parent?.createWebhook({
+      name: login,
+      avatar: avatar_url,
+    });
+    if (!webhook) return;
+
+    const messagePayload = MessagePayload.create(webhook, {
+      content,
+      threadId: thread.id,
+    }).resolveBody();
+    await webhook.send(messagePayload);
+    await webhook.delete("Cleanup");
+
+    info(Actions.Referenced, thread);
+  } catch (err) {
+    logger.warn(
+      `Failed to send activity message to thread ${thread.id}: ${err instanceof Error ? err.message : "Unknown error"}`,
+    );
+  }
+}
+
+export async function sendActivityMessageByNumber({
+  number,
+  login,
+  avatar_url,
+  content,
+}: {
+  number: number;
+  login: string;
+  avatar_url: string;
+  content: string;
+}) {
+  const thread = store.threads.find((t) => t.number === number);
+  if (!thread?.node_id) return;
+
+  await sendActivityMessage({
+    node_id: thread.node_id,
+    login,
+    avatar_url,
+    content,
+  });
+}
+
 export async function archiveThread(node_id: string | undefined) {
   const { thread, channel } = await getThreadChannel(node_id);
   if (!thread || !channel || channel.archived) return;
